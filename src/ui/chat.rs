@@ -21,7 +21,7 @@ use crate::ui::theme;
 // ============================================================================
 
 /// Prefix for user messages.
-const USER_PREFIX: &str = "  ❯ ";
+const USER_PREFIX: &str = "    ";
 
 /// Prefix for assistant messages (indentation).
 const ASSISTANT_INDENT: &str = "    ";
