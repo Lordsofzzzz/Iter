@@ -110,17 +110,10 @@ export class LLMClient {
         }
 
         // Extract usage info (handles multiple provider formats).
-        const usage = await result.usage as {
-          promptTokens?: number;
-          completionTokens?: number;
-          providerMetadata?: {
-            anthropic?: { cacheReadInputTokens?: number; cacheCreationInputTokens?: number };
-            openai?: { cachedTokens?: number };
-          };
-        };
+        const usage = await result.usage;
 
-        const input  = usage.promptTokens ?? 0;
-        const output = usage.completionTokens ?? 0;
+        const input  = usage?.promptTokens ?? usage?.tokensPrompt ?? 0;
+        const output = usage?.completionTokens ?? usage?.tokensCompletion ?? 0;
 
         const meta = usage.providerMetadata ?? {};
         const anthropicMeta = meta?.anthropic ?? {};
