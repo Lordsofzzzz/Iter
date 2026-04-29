@@ -89,7 +89,9 @@ pub fn ui(f: &mut Frame, app: &App) {
     if let Some(deadline) = app.cooldown_deadline {
         let remaining_ms = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
         let secs = (remaining_ms + 999) / 1000;
-        let rate_label = format!("⚠ rate limited: {}s ({} left)", secs, app.cooldown_retries_left);
+        let elapsed_ms = app.streaming_elapsed_ms().unwrap_or(0);
+        let frame_char = get_rate_limit_frame(elapsed_ms);
+        let rate_label = format!("{} rate limited: {}s ({} left)", frame_char, secs, app.cooldown_retries_left);
         let rate = Paragraph::new(Line::from(vec![
             Span::styled(rate_label, theme::WARNING),
         ]));
@@ -132,5 +134,11 @@ fn get_breathing_frame(elapsed_ms: u64) -> (char, &'static str) {
         ('▦', "finalizing"),
     ];
     let idx = (elapsed_ms / 150) as usize % FRAMES.len();
+    FRAMES[idx]
+}
+
+fn get_rate_limit_frame(elapsed_ms: u64) -> char {
+    const FRAMES: [char; 4] = ['⏳', '⏱', '⚡', '⚠'];
+    let idx = (elapsed_ms / 500) as usize % FRAMES.len();
     FRAMES[idx]
 }
