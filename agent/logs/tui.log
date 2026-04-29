@@ -1,0 +1,977 @@
+[2026-04-28T18:38:17.940Z] Retrying in 2000ms (5 left)
+[2026-04-28T18:38:27.026Z] Retrying in 4000ms (4 left)
+[2026-04-28T18:38:38.320Z] Retrying in 8000ms (3 left)
+[2026-04-28T18:38:53.703Z] Retrying in 16000ms (2 left)
+[2026-04-28T18:45:26.849Z] {"type":"agent_start"}
+[2026-04-28T18:45:26.857Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"google/gemma-4-26b-a4b-it:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-28T18:45:28.144Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-28T18:45:28.145Z] {"type":"turn_start"}
+[2026-04-28T18:45:35.812Z] Retrying in 2000ms (5 left)
+[2026-04-28T18:45:44.827Z] Retrying in 4000ms (4 left)
+[2026-04-28T18:45:55.739Z] Retrying in 8000ms (3 left)
+[2026-04-28T18:46:11.649Z] Retrying in 16000ms (2 left)
+[2026-04-29T04:28:26.954Z] {"type":"agent_start"}
+[2026-04-29T04:28:26.971Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"google/gemma-4-26b-a4b-it:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T04:28:28.130Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T04:28:28.131Z] {"type":"turn_start"}
+[2026-04-29T04:28:35.897Z] Retrying in 2000ms (5 left)
+[2026-04-29T04:28:44.982Z] Retrying in 4000ms (4 left)
+[2026-04-29T04:38:32.366Z] {"type":"agent_start"}
+[2026-04-29T04:38:32.377Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"google/gemma-4-26b-a4b-it:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T04:38:35.306Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T04:38:35.307Z] {"type":"turn_start"}
+[2026-04-29T04:38:43.225Z] Retrying in 2000ms (5 left)
+[2026-04-29T04:38:52.531Z] Retrying in 4000ms (4 left)
+[2026-04-29T04:39:03.795Z] Retrying in 8000ms (3 left)
+[2026-04-29T04:39:19.060Z] Retrying in 16000ms (2 left)
+[2026-04-29T04:39:33.384Z] {"type":"agent_start"}
+[2026-04-29T04:39:33.394Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"google/gemma-4-26b-a4b-it:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T04:51:18.920Z] {"type":"agent_start"}
+[2026-04-29T04:51:18.930Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"@minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T04:51:23.027Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T04:51:23.028Z] {"type":"turn_start"}
+[2026-04-29T04:51:23.562Z] Retrying in 2000ms (5 left)
+[2026-04-29T04:51:25.593Z] Retrying in 4000ms (4 left)
+[2026-04-29T04:51:29.628Z] Retrying in 8000ms (3 left)
+[2026-04-29T04:51:37.661Z] Retrying in 16000ms (2 left)
+[2026-04-29T04:51:53.697Z] Retrying in 32000ms (1 left)
+[2026-04-29T04:52:28.276Z] {"type":"agent_start"}
+[2026-04-29T04:52:28.286Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"@minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T04:55:49.218Z] {"type":"agent_start"}
+[2026-04-29T04:55:49.227Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T04:55:50.693Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T04:55:50.694Z] {"type":"turn_start"}
+[2026-04-29T04:56:51.278Z] {"type":"agent_start"}
+[2026-04-29T04:56:51.288Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T04:56:56.933Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T04:56:56.934Z] {"type":"turn_start"}
+[2026-04-29T04:57:06.495Z] Retrying in 2000ms (5 left)
+[2026-04-29T04:57:16.588Z] {"type":"text_delta","delta":"I'd"}
+[2026-04-29T04:57:16.611Z] {"type":"text_delta","delta":" be"}
+[2026-04-29T04:57:16.640Z] {"type":"text_delta","delta":" happy"}
+[2026-04-29T04:57:16.665Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T04:57:16.693Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T04:57:16.720Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T04:57:16.746Z] {"type":"text_delta","delta":" check"}
+[2026-04-29T04:57:16.774Z] {"type":"text_delta","delta":" something"}
+[2026-04-29T04:57:16.801Z] {"type":"text_delta","delta":","}
+[2026-04-29T04:57:16.828Z] {"type":"text_delta","delta":" but"}
+[2026-04-29T04:57:16.854Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T04:57:16.883Z] {"type":"text_delta","delta":" need"}
+[2026-04-29T04:57:16.909Z] {"type":"text_delta","delta":" a"}
+[2026-04-29T04:57:16.936Z] {"type":"text_delta","delta":" bit"}
+[2026-04-29T04:57:16.964Z] {"type":"text_delta","delta":" more"}
+[2026-04-29T04:57:16.998Z] {"type":"text_delta","delta":" information"}
+[2026-04-29T04:57:17.016Z] {"type":"text_delta","delta":"."}
+[2026-04-29T04:57:17.044Z] {"type":"text_delta","delta":" Could"}
+[2026-04-29T04:57:17.077Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T04:57:17.099Z] {"type":"text_delta","delta":" please"}
+[2026-04-29T04:57:17.127Z] {"type":"text_delta","delta":" provide"}
+[2026-04-29T04:57:17.155Z] {"type":"text_delta","delta":" the"}
+[2026-04-29T04:57:17.182Z] {"type":"text_delta","delta":" details"}
+[2026-04-29T04:57:17.208Z] {"type":"text_delta","delta":" you'd"}
+[2026-04-29T04:57:17.235Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T04:57:17.264Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T04:57:17.290Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T04:57:17.319Z] {"type":"text_delta","delta":" review"}
+[2026-04-29T04:57:17.346Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T04:57:17.373Z] {"type":"text_delta","delta":" For"}
+[2026-04-29T04:57:17.398Z] {"type":"text_delta","delta":" example"}
+[2026-04-29T04:57:17.426Z] {"type":"text_delta","delta":":\n\n"}
+[2026-04-29T04:57:17.453Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T04:57:17.480Z] {"type":"text_delta","delta":" A"}
+[2026-04-29T04:57:17.515Z] {"type":"text_delta","delta":" code"}
+[2026-04-29T04:57:17.539Z] {"type":"text_delta","delta":" snippet"}
+[2026-04-29T04:57:17.564Z] {"type":"text_delta","delta":"\n"}
+[2026-04-29T04:57:17.590Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T04:57:17.617Z] {"type":"text_delta","delta":" A"}
+[2026-04-29T04:57:17.645Z] {"type":"text_delta","delta":" piece"}
+[2026-04-29T04:57:17.676Z] {"type":"text_delta","delta":" of"}
+[2026-04-29T04:57:17.708Z] {"type":"text_delta","delta":" text"}
+[2026-04-29T04:57:17.726Z] {"type":"text_delta","delta":"\n"}
+[2026-04-29T04:57:17.753Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T04:57:17.780Z] {"type":"text_delta","delta":" A"}
+[2026-04-29T04:57:17.835Z] {"type":"text_delta","delta":" file"}
+[2026-04-29T04:57:17.843Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T04:57:17.862Z] {"type":"text_delta","delta":" document"}
+[2026-04-29T04:57:17.889Z] {"type":"text_delta","delta":"\n"}
+[2026-04-29T04:57:17.919Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T04:57:17.946Z] {"type":"text_delta","delta":" A"}
+[2026-04-29T04:57:17.973Z] {"type":"text_delta","delta":" specific"}
+[2026-04-29T04:57:18.000Z] {"type":"text_delta","delta":" question"}
+[2026-04-29T04:57:18.025Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T04:57:18.054Z] {"type":"text_delta","delta":" problem"}
+[2026-04-29T04:57:18.082Z] {"type":"text_delta","delta":"\n\n"}
+[2026-04-29T04:57:18.109Z] {"type":"text_delta","delta":"Let"}
+[2026-04-29T04:57:18.136Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T04:57:18.162Z] {"type":"text_delta","delta":" know"}
+[2026-04-29T04:57:18.566Z] {"type":"text_delta","delta":" what"}
+[2026-04-29T04:57:18.566Z] {"type":"text_delta","delta":" you'd"}
+[2026-04-29T04:57:18.566Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T04:57:18.566Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T04:57:18.567Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T04:57:18.567Z] {"type":"text_delta","delta":" check"}
+[2026-04-29T04:57:18.567Z] {"type":"text_delta","delta":","}
+[2026-04-29T04:57:18.567Z] {"type":"text_delta","delta":" and"}
+[2026-04-29T04:57:18.567Z] {"type":"text_delta","delta":" I'll"}
+[2026-04-29T04:57:18.567Z] {"type":"text_delta","delta":" do"}
+[2026-04-29T04:57:18.568Z] {"type":"text_delta","delta":" my"}
+[2026-04-29T04:57:18.568Z] {"type":"text_delta","delta":" best"}
+[2026-04-29T04:57:18.568Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T04:57:18.568Z] {"type":"text_delta","delta":" assist"}
+[2026-04-29T04:57:18.574Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T04:57:18.600Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T04:57:18.639Z] {"type":"turn_end"}
+[2026-04-29T04:57:18.640Z] {"type":"agent_end"}
+[2026-04-29T04:57:18.740Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":40,"output":214,"cache_read":0,"cache_write":0,"total":254},"context_usage":{"tokens":254,"limit":200000,"percent":0.1},"cost":0,"turns":1}}
+[2026-04-29T05:18:04.154Z] {"type":"agent_start"}
+[2026-04-29T05:18:04.164Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:18:06.993Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:18:06.995Z] {"type":"turn_start"}
+[2026-04-29T05:18:09.766Z] {"type":"text_delta","delta":"Hi"}
+[2026-04-29T05:18:09.790Z] {"type":"text_delta","delta":" there"}
+[2026-04-29T05:18:09.817Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:18:09.874Z] {"type":"text_delta","delta":" 👋"}
+[2026-04-29T05:18:09.898Z] {"type":"text_delta","delta":" How"}
+[2026-04-29T05:18:09.922Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:18:09.949Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:18:09.974Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:18:10.001Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:18:10.026Z] {"type":"text_delta","delta":" today"}
+[2026-04-29T05:18:10.056Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:18:10.104Z] {"type":"turn_end"}
+[2026-04-29T05:18:10.105Z] {"type":"agent_end"}
+[2026-04-29T05:18:10.124Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":39,"output":39,"cache_read":0,"cache_write":0,"total":78},"context_usage":{"tokens":78,"limit":200000,"percent":0},"cost":0,"turns":1}}
+[2026-04-29T05:18:28.322Z] {"kind":"response","command":"prompt","id":"prompt-2","success":true}
+[2026-04-29T05:18:28.322Z] {"type":"turn_start"}
+[2026-04-29T05:18:31.229Z] {"type":"text_delta","delta":"Alright"}
+[2026-04-29T05:18:31.230Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:18:31.231Z] {"type":"text_delta","delta":" let's"}
+[2026-04-29T05:18:31.231Z] {"type":"text_delta","delta":" chat"}
+[2026-04-29T05:18:31.232Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:18:31.233Z] {"type":"text_delta","delta":" 😊"}
+[2026-04-29T05:18:31.233Z] {"type":"text_delta","delta":"\n\n"}
+[2026-04-29T05:18:31.234Z] {"type":"text_delta","delta":"What's"}
+[2026-04-29T05:18:31.234Z] {"type":"text_delta","delta":" on"}
+[2026-04-29T05:18:31.236Z] {"type":"text_delta","delta":" your"}
+[2026-04-29T05:18:31.237Z] {"type":"text_delta","delta":" mind"}
+[2026-04-29T05:18:31.238Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:18:31.238Z] {"type":"text_delta","delta":" Are"}
+[2026-04-29T05:18:31.239Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:18:31.240Z] {"type":"text_delta","delta":" working"}
+[2026-04-29T05:18:31.240Z] {"type":"text_delta","delta":" on"}
+[2026-04-29T05:18:31.241Z] {"type":"text_delta","delta":" any"}
+[2026-04-29T05:18:31.242Z] {"type":"text_delta","delta":" interesting"}
+[2026-04-29T05:18:31.242Z] {"type":"text_delta","delta":" projects"}
+[2026-04-29T05:18:31.242Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:18:31.243Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T05:18:31.243Z] {"type":"text_delta","delta":" just"}
+[2026-04-29T05:18:31.244Z] {"type":"text_delta","delta":" hanging"}
+[2026-04-29T05:18:31.244Z] {"type":"text_delta","delta":" out"}
+[2026-04-29T05:18:31.245Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:18:31.245Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:18:31.246Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:18:31.246Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:18:31.247Z] {"type":"text_delta","delta":" with"}
+[2026-04-29T05:18:31.248Z] {"type":"text_delta","delta":" coding"}
+[2026-04-29T05:18:31.268Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:18:31.294Z] {"type":"text_delta","delta":" answer"}
+[2026-04-29T05:18:31.325Z] {"type":"text_delta","delta":" questions"}
+[2026-04-29T05:18:31.351Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:18:31.377Z] {"type":"text_delta","delta":" brainstorm"}
+[2026-04-29T05:18:31.406Z] {"type":"text_delta","delta":" ideas"}
+[2026-04-29T05:18:31.432Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:18:31.461Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T05:18:31.485Z] {"type":"text_delta","delta":" just"}
+[2026-04-29T05:18:31.516Z] {"type":"text_delta","delta":" talk"}
+[2026-04-29T05:18:31.538Z] {"type":"text_delta","delta":" about"}
+[2026-04-29T05:18:31.565Z] {"type":"text_delta","delta":" whatever"}
+[2026-04-29T05:18:31.593Z] {"type":"text_delta","delta":".\n\n"}
+[2026-04-29T05:18:31.619Z] {"type":"text_delta","delta":"What"}
+[2026-04-29T05:18:31.644Z] {"type":"text_delta","delta":" would"}
+[2026-04-29T05:18:31.672Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:18:31.697Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T05:18:31.726Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:18:31.751Z] {"type":"text_delta","delta":" chat"}
+[2026-04-29T05:18:31.777Z] {"type":"text_delta","delta":" about"}
+[2026-04-29T05:18:31.803Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:18:31.842Z] {"type":"turn_end"}
+[2026-04-29T05:18:31.842Z] {"type":"agent_end"}
+[2026-04-29T05:18:31.934Z] {"kind":"response","command":"get_session_stats","id":"stats-2","success":true,"data":{"tokens":{"input":102,"output":120,"cache_read":0,"cache_write":0,"total":222},"context_usage":{"tokens":222,"limit":200000,"percent":0.1},"cost":0,"turns":2}}
+[2026-04-29T05:18:59.676Z] {"kind":"response","command":"prompt","id":"prompt-3","success":true}
+[2026-04-29T05:18:59.676Z] {"type":"turn_start"}
+[2026-04-29T05:19:38.957Z] {"type":"agent_start"}
+[2026-04-29T05:19:38.968Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:19:41.188Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:19:41.189Z] {"type":"turn_start"}
+[2026-04-29T05:19:51.413Z] Retrying in 2000ms (5 left)
+[2026-04-29T05:20:23.536Z] {"type":"agent_start"}
+[2026-04-29T05:20:23.547Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:20:25.195Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:20:25.196Z] {"type":"turn_start"}
+[2026-04-29T05:20:32.697Z] {"type":"text_delta","delta":"Hi"}
+[2026-04-29T05:20:32.718Z] {"type":"text_delta","delta":" there"}
+[2026-04-29T05:20:32.746Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:20:32.804Z] {"type":"text_delta","delta":" 👋"}
+[2026-04-29T05:20:32.825Z] {"type":"text_delta","delta":" How"}
+[2026-04-29T05:20:32.851Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:20:32.878Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:20:32.907Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:20:32.934Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:20:32.958Z] {"type":"text_delta","delta":" today"}
+[2026-04-29T05:20:32.986Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:20:33.040Z] {"type":"turn_end"}
+[2026-04-29T05:20:33.040Z] {"type":"agent_end"}
+[2026-04-29T05:20:33.147Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":39,"output":48,"cache_read":0,"cache_write":0,"total":87},"context_usage":{"tokens":87,"limit":200000,"percent":0},"cost":0,"turns":1}}
+[2026-04-29T05:20:47.030Z] {"type":"agent_start"}
+[2026-04-29T05:20:47.040Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:20:48.630Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:20:48.631Z] {"type":"turn_start"}
+[2026-04-29T05:20:58.287Z] Retrying in 2000ms (5 left)
+[2026-04-29T05:21:09.337Z] Retrying in 4000ms (4 left)
+[2026-04-29T05:21:20.389Z] {"type":"agent_start"}
+[2026-04-29T05:21:20.399Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:21:21.378Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:21:21.379Z] {"type":"turn_start"}
+[2026-04-29T05:21:52.470Z] {"type":"agent_start"}
+[2026-04-29T05:21:52.480Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:21:57.654Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:21:57.656Z] {"type":"turn_start"}
+[2026-04-29T05:22:07.811Z] Retrying in 2000ms (5 left)
+[2026-04-29T05:22:23.978Z] {"type":"text_delta","delta":"Sure"}
+[2026-04-29T05:22:23.999Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:22:24.007Z] {"type":"text_delta","delta":" What"}
+[2026-04-29T05:22:24.030Z] {"type":"text_delta","delta":" would"}
+[2026-04-29T05:22:24.054Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:22:24.078Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T05:22:24.101Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:22:24.124Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:22:24.144Z] {"type":"text_delta","delta":" check"}
+[2026-04-29T05:22:24.169Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:22:24.191Z] {"type":"text_delta","delta":" Please"}
+[2026-04-29T05:22:24.214Z] {"type":"text_delta","delta":" share"}
+[2026-04-29T05:22:24.237Z] {"type":"text_delta","delta":" the"}
+[2026-04-29T05:22:24.259Z] {"type":"text_delta","delta":" code"}
+[2026-04-29T05:22:24.286Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:22:24.346Z] {"type":"text_delta","delta":" text"}
+[2026-04-29T05:22:24.346Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:22:24.363Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T05:22:24.384Z] {"type":"text_delta","delta":" details"}
+[2026-04-29T05:22:24.408Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:22:24.432Z] {"type":"text_delta","delta":"’d"}
+[2026-04-29T05:22:24.454Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T05:22:24.478Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:22:24.511Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:22:24.523Z] {"type":"text_delta","delta":" review"}
+[2026-04-29T05:22:24.546Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:22:24.568Z] {"type":"text_delta","delta":" and"}
+[2026-04-29T05:22:24.593Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:22:24.616Z] {"type":"text_delta","delta":"’ll"}
+[2026-04-29T05:40:13.553Z] {"type":"agent_start"}
+[2026-04-29T05:40:13.565Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:40:16.610Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:40:16.611Z] {"type":"turn_start"}
+[2026-04-29T05:40:18.916Z] {"type":"text_delta","delta":"Hi"}
+[2026-04-29T05:40:18.917Z] {"type":"text_delta","delta":" there"}
+[2026-04-29T05:40:18.917Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:40:18.918Z] {"type":"text_delta","delta":" 👋"}
+[2026-04-29T05:40:18.918Z] {"type":"text_delta","delta":" How"}
+[2026-04-29T05:40:18.919Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:40:18.920Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:40:18.920Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:40:18.929Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:40:18.950Z] {"type":"text_delta","delta":" today"}
+[2026-04-29T05:40:18.963Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:40:19.001Z] {"type":"turn_end"}
+[2026-04-29T05:40:19.001Z] {"type":"agent_end"}
+[2026-04-29T05:40:19.074Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":39,"output":48,"cache_read":0,"cache_write":0,"total":87},"context_usage":{"tokens":87,"limit":200000,"percent":0},"cost":0,"turns":1}}
+[2026-04-29T05:40:32.988Z] {"kind":"response","command":"prompt","id":"prompt-2","success":true}
+[2026-04-29T05:40:32.988Z] {"type":"turn_start"}
+[2026-04-29T05:40:42.144Z] Retrying in 2000ms (5 left)
+[2026-04-29T05:40:42.145Z] {"type":"cooldown","wait_ms":2000,"retries_left":5}
+[2026-04-29T05:40:44.146Z] {"type":"turn_start"}
+[2026-04-29T05:40:52.079Z] {"type":"text_delta","delta":"I"}
+[2026-04-29T05:40:52.106Z] {"type":"text_delta","delta":" don't"}
+[2026-04-29T05:40:52.133Z] {"type":"text_delta","delta":" have"}
+[2026-04-29T05:40:52.161Z] {"type":"text_delta","delta":" access"}
+[2026-04-29T05:40:52.188Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:40:52.218Z] {"type":"text_delta","delta":" the"}
+[2026-04-29T05:40:52.245Z] {"type":"text_delta","delta":" exact"}
+[2026-04-29T05:40:52.275Z] {"type":"text_delta","delta":" token"}
+[2026-04-29T05:40:52.305Z] {"type":"text_delta","delta":" count"}
+[2026-04-29T05:40:52.330Z] {"type":"text_delta","delta":" for"}
+[2026-04-29T05:40:52.357Z] {"type":"text_delta","delta":" our"}
+[2026-04-29T05:40:52.390Z] {"type":"text_delta","delta":" conversation"}
+[2026-04-29T05:40:52.415Z] {"type":"text_delta","delta":"."}
+[2026-04-29T05:40:52.446Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:40:52.474Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:40:52.498Z] {"type":"text_delta","delta":" estimate"}
+[2026-04-29T05:40:52.527Z] {"type":"text_delta","delta":" my"}
+[2026-04-29T05:40:52.555Z] {"type":"text_delta","delta":" own"}
+[2026-04-29T05:40:52.582Z] {"type":"text_delta","delta":" responses"}
+[2026-04-29T05:40:52.612Z] {"type":"text_delta","delta":" roughly"}
+[2026-04-29T05:40:52.639Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:40:52.670Z] {"type":"text_delta","delta":" but"}
+[2026-04-29T05:40:52.695Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:40:52.725Z] {"type":"text_delta","delta":" don't"}
+[2026-04-29T05:40:52.753Z] {"type":"text_delta","delta":" have"}
+[2026-04-29T05:40:52.784Z] {"type":"text_delta","delta":" a"}
+[2026-04-29T05:40:52.808Z] {"type":"text_delta","delta":" precise"}
+[2026-04-29T05:40:52.846Z] {"type":"text_delta","delta":" count"}
+[2026-04-29T05:40:52.864Z] {"type":"text_delta","delta":" of"}
+[2026-04-29T05:40:52.894Z] {"type":"text_delta","delta":" tokens"}
+[2026-04-29T05:40:52.923Z] {"type":"text_delta","delta":" used"}
+[2026-04-29T05:40:52.950Z] {"type":"text_delta","delta":" in"}
+[2026-04-29T05:40:52.976Z] {"type":"text_delta","delta":" this"}
+[2026-04-29T05:40:53.005Z] {"type":"text_delta","delta":" exchange"}
+[2026-04-29T05:40:53.032Z] {"type":"text_delta","delta":".\n\n"}
+[2026-04-29T05:40:53.070Z] {"type":"text_delta","delta":"If"}
+[2026-04-29T05:40:53.090Z] {"type":"text_delta","delta":" you're"}
+[2026-04-29T05:40:53.116Z] {"type":"text_delta","delta":" curious"}
+[2026-04-29T05:40:53.144Z] {"type":"text_delta","delta":" about"}
+[2026-04-29T05:40:53.173Z] {"type":"text_delta","delta":" token"}
+[2026-04-29T05:40:53.202Z] {"type":"text_delta","delta":" usage"}
+[2026-04-29T05:40:53.230Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:40:53.257Z] {"type":"text_delta","delta":" most"}
+[2026-04-29T05:40:53.285Z] {"type":"text_delta","delta":" L"}
+[2026-04-29T05:40:53.313Z] {"type":"text_delta","delta":"LM"}
+[2026-04-29T05:40:53.342Z] {"type":"text_delta","delta":" interfaces"}
+[2026-04-29T05:40:53.370Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T05:40:53.397Z] {"type":"text_delta","delta":" APIs"}
+[2026-04-29T05:40:53.425Z] {"type":"text_delta","delta":" provide"}
+[2026-04-29T05:40:53.454Z] {"type":"text_delta","delta":" that"}
+[2026-04-29T05:40:53.484Z] {"type":"text_delta","delta":" information"}
+[2026-04-29T05:40:53.511Z] {"type":"text_delta","delta":" separately"}
+[2026-04-29T05:40:53.541Z] {"type":"text_delta","delta":"."}
+[2026-04-29T05:40:53.566Z] {"type":"text_delta","delta":" Is"}
+[2026-04-29T05:40:53.594Z] {"type":"text_delta","delta":" there"}
+[2026-04-29T05:40:53.625Z] {"type":"text_delta","delta":" something"}
+[2026-04-29T05:40:53.657Z] {"type":"text_delta","delta":" specific"}
+[2026-04-29T05:40:53.678Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:40:53.716Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:40:53.736Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:40:53.764Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:40:53.793Z] {"type":"text_delta","delta":" with"}
+[2026-04-29T05:40:53.818Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:40:53.860Z] {"type":"turn_end"}
+[2026-04-29T05:40:53.860Z] {"type":"agent_end"}
+[2026-04-29T05:40:53.977Z] {"kind":"response","command":"get_session_stats","id":"stats-2","success":true,"data":{"tokens":{"input":106,"output":223,"cache_read":0,"cache_write":0,"total":329},"context_usage":{"tokens":329,"limit":200000,"percent":0.2},"cost":0,"turns":2}}
+[2026-04-29T05:46:06.704Z] {"type":"agent_start"}
+[2026-04-29T05:46:06.717Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T05:46:09.060Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T05:46:09.062Z] {"type":"turn_start"}
+[2026-04-29T05:46:32.046Z] {"type":"text_delta","delta":"Hi"}
+[2026-04-29T05:46:32.760Z] {"type":"text_delta","delta":" there"}
+[2026-04-29T05:46:33.382Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:46:34.742Z] {"type":"text_delta","delta":" 👋"}
+[2026-04-29T05:46:35.524Z] {"type":"text_delta","delta":" How"}
+[2026-04-29T05:46:36.242Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:46:36.959Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:46:37.675Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:46:38.495Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:46:39.211Z] {"type":"text_delta","delta":" today"}
+[2026-04-29T05:46:39.927Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T05:46:40.769Z] {"type":"turn_end"}
+[2026-04-29T05:46:40.769Z] {"type":"agent_end"}
+[2026-04-29T05:46:40.874Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":39,"output":48,"cache_read":0,"cache_write":0,"total":87},"context_usage":{"tokens":87,"limit":200000,"percent":0},"cost":0,"turns":1}}
+[2026-04-29T05:47:09.597Z] {"kind":"response","command":"prompt","id":"prompt-2","success":true}
+[2026-04-29T05:47:09.598Z] {"type":"turn_start"}
+[2026-04-29T05:47:16.899Z] {"type":"text_delta","delta":"I'm"}
+[2026-04-29T05:47:16.900Z] {"type":"text_delta","delta":" not"}
+[2026-04-29T05:47:16.900Z] {"type":"text_delta","delta":" able"}
+[2026-04-29T05:47:16.901Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:47:16.901Z] {"type":"text_delta","delta":" see"}
+[2026-04-29T05:47:16.902Z] {"type":"text_delta","delta":" my"}
+[2026-04-29T05:47:16.902Z] {"type":"text_delta","delta":" exact"}
+[2026-04-29T05:47:16.903Z] {"type":"text_delta","delta":" token"}
+[2026-04-29T05:47:16.903Z] {"type":"text_delta","delta":" consumption"}
+[2026-04-29T05:47:16.904Z] {"type":"text_delta","delta":" in"}
+[2026-04-29T05:47:16.910Z] {"type":"text_delta","delta":" real"}
+[2026-04-29T05:47:16.939Z] {"type":"text_delta","delta":"-time"}
+[2026-04-29T05:47:16.965Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:47:16.996Z] {"type":"text_delta","delta":" but"}
+[2026-04-29T05:47:17.031Z] {"type":"text_delta","delta":" here's"}
+[2026-04-29T05:47:17.052Z] {"type":"text_delta","delta":" some"}
+[2026-04-29T05:47:17.076Z] {"type":"text_delta","delta":" general"}
+[2026-04-29T05:47:17.102Z] {"type":"text_delta","delta":" info"}
+[2026-04-29T05:47:17.133Z] {"type":"text_delta","delta":":\n\n"}
+[2026-04-29T05:47:17.158Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T05:47:17.184Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T05:47:17.211Z] {"type":"text_delta","delta":"Context"}
+[2026-04-29T05:47:17.239Z] {"type":"text_delta","delta":" window"}
+[2026-04-29T05:47:17.267Z] {"type":"text_delta","delta":"**:"}
+[2026-04-29T05:47:17.295Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:47:17.322Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:47:17.348Z] {"type":"text_delta","delta":" handle"}
+[2026-04-29T05:47:17.376Z] {"type":"text_delta","delta":" up"}
+[2026-04-29T05:47:17.403Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:47:17.430Z] {"type":"text_delta","delta":" ~"}
+[2026-04-29T05:47:17.456Z] {"type":"text_delta","delta":"200"}
+[2026-04-29T05:47:17.485Z] {"type":"text_delta","delta":"K"}
+[2026-04-29T05:47:17.511Z] {"type":"text_delta","delta":" tokens"}
+[2026-04-29T05:47:17.540Z] {"type":"text_delta","delta":" in"}
+[2026-04-29T05:47:17.566Z] {"type":"text_delta","delta":" a"}
+[2026-04-29T05:47:17.593Z] {"type":"text_delta","delta":" conversation"}
+[2026-04-29T05:47:17.619Z] {"type":"text_delta","delta":" ("}
+[2026-04-29T05:47:17.646Z] {"type":"text_delta","delta":"input"}
+[2026-04-29T05:47:17.674Z] {"type":"text_delta","delta":" +"}
+[2026-04-29T05:47:17.702Z] {"type":"text_delta","delta":" output"}
+[2026-04-29T05:47:17.731Z] {"type":"text_delta","delta":" combined"}
+[2026-04-29T05:47:17.757Z] {"type":"text_delta","delta":")\n"}
+[2026-04-29T05:47:17.784Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T05:47:17.812Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T05:47:17.839Z] {"type":"text_delta","delta":"Per"}
+[2026-04-29T05:47:17.864Z] {"type":"text_delta","delta":" message"}
+[2026-04-29T05:47:17.892Z] {"type":"text_delta","delta":"**:"}
+[2026-04-29T05:47:17.919Z] {"type":"text_delta","delta":" Typical"}
+[2026-04-29T05:47:17.953Z] {"type":"text_delta","delta":" responses"}
+[2026-04-29T05:47:17.973Z] {"type":"text_delta","delta":" use"}
+[2026-04-29T05:47:18.055Z] {"type":"text_delta","delta":" anywhere"}
+[2026-04-29T05:47:18.115Z] {"type":"text_delta","delta":" from"}
+[2026-04-29T05:47:18.115Z] {"type":"text_delta","delta":" a"}
+[2026-04-29T05:47:18.135Z] {"type":"text_delta","delta":" few"}
+[2026-04-29T05:47:18.162Z] {"type":"text_delta","delta":" dozen"}
+[2026-04-29T05:47:18.190Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:47:18.221Z] {"type":"text_delta","delta":" a"}
+[2026-04-29T05:47:18.248Z] {"type":"text_delta","delta":" few"}
+[2026-04-29T05:47:18.276Z] {"type":"text_delta","delta":" hundred"}
+[2026-04-29T05:47:18.302Z] {"type":"text_delta","delta":" tokens"}
+[2026-04-29T05:47:18.331Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:47:18.360Z] {"type":"text_delta","delta":" depending"}
+[2026-04-29T05:47:18.396Z] {"type":"text_delta","delta":" on"}
+[2026-04-29T05:47:18.415Z] {"type":"text_delta","delta":" length"}
+[2026-04-29T05:47:18.442Z] {"type":"text_delta","delta":" and"}
+[2026-04-29T05:47:18.470Z] {"type":"text_delta","delta":" complexity"}
+[2026-04-29T05:47:18.499Z] {"type":"text_delta","delta":"\n"}
+[2026-04-29T05:47:18.529Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T05:47:18.554Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T05:47:18.583Z] {"type":"text_delta","delta":"I"}
+[2026-04-29T05:47:19.046Z] {"type":"text_delta","delta":" don't"}
+[2026-04-29T05:47:19.046Z] {"type":"text_delta","delta":" track"}
+[2026-04-29T05:47:19.456Z] {"type":"text_delta","delta":" my"}
+[2026-04-29T05:47:19.864Z] {"type":"text_delta","delta":" own"}
+[2026-04-29T05:47:21.201Z] {"type":"text_delta","delta":" usage"}
+[2026-04-29T05:47:21.201Z] {"type":"text_delta","delta":"**"}
+[2026-04-29T05:47:21.202Z] {"type":"text_delta","delta":" -"}
+[2026-04-29T05:47:21.604Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:47:22.015Z] {"type":"text_delta","delta":" don't"}
+[2026-04-29T05:47:22.424Z] {"type":"text_delta","delta":" have"}
+[2026-04-29T05:47:22.938Z] {"type":"text_delta","delta":" access"}
+[2026-04-29T05:47:23.352Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:47:23.654Z] {"type":"text_delta","delta":" internal"}
+[2026-04-29T05:47:23.655Z] {"type":"text_delta","delta":" metrics"}
+[2026-04-29T05:47:23.655Z] {"type":"text_delta","delta":" about"}
+[2026-04-29T05:47:23.655Z] {"type":"text_delta","delta":" how"}
+[2026-04-29T05:47:23.682Z] {"type":"text_delta","delta":" many"}
+[2026-04-29T05:47:23.723Z] {"type":"text_delta","delta":" tokens"}
+[2026-04-29T05:47:23.739Z] {"type":"text_delta","delta":" are"}
+[2026-04-29T05:47:23.765Z] {"type":"text_delta","delta":" used"}
+[2026-04-29T05:47:23.794Z] {"type":"text_delta","delta":" per"}
+[2026-04-29T05:47:23.830Z] {"type":"text_delta","delta":" conversation"}
+[2026-04-29T05:47:23.853Z] {"type":"text_delta","delta":"\n\n"}
+[2026-04-29T05:47:23.877Z] {"type":"text_delta","delta":"If"}
+[2026-04-29T05:47:23.905Z] {"type":"text_delta","delta":" you're"}
+[2026-04-29T05:47:23.932Z] {"type":"text_delta","delta":" asking"}
+[2026-04-29T05:47:23.961Z] {"type":"text_delta","delta":" about"}
+[2026-04-29T05:47:23.995Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T05:47:24.018Z] {"type":"text_delta","delta":"c"}
+[2026-04-29T05:47:24.044Z] {"type":"text_delta","delta":"osts"}
+[2026-04-29T05:47:24.072Z] {"type":"text_delta","delta":"**"}
+[2026-04-29T05:47:24.100Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T05:47:24.131Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T05:47:24.160Z] {"type":"text_delta","delta":"usage"}
+[2026-04-29T05:47:24.185Z] {"type":"text_delta","delta":" tracking"}
+[2026-04-29T05:47:24.212Z] {"type":"text_delta","delta":"**,"}
+[2026-04-29T05:47:24.242Z] {"type":"text_delta","delta":" that"}
+[2026-04-29T05:47:24.269Z] {"type":"text_delta","delta":" would"}
+[2026-04-29T05:47:24.296Z] {"type":"text_delta","delta":" typically"}
+[2026-04-29T05:47:24.325Z] {"type":"text_delta","delta":" be"}
+[2026-04-29T05:47:24.352Z] {"type":"text_delta","delta":" handled"}
+[2026-04-29T05:47:24.380Z] {"type":"text_delta","delta":" by"}
+[2026-04-29T05:47:24.410Z] {"type":"text_delta","delta":" the"}
+[2026-04-29T05:47:24.439Z] {"type":"text_delta","delta":" system"}
+[2026-04-29T05:47:24.468Z] {"type":"text_delta","delta":" running"}
+[2026-04-29T05:47:24.492Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:47:24.521Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:47:24.550Z] {"type":"text_delta","delta":" not"}
+[2026-04-29T05:47:24.578Z] {"type":"text_delta","delta":" by"}
+[2026-04-29T05:47:24.604Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:47:24.633Z] {"type":"text_delta","delta":" directly"}
+[2026-04-29T05:47:24.660Z] {"type":"text_delta","delta":".\n\n"}
+[2026-04-29T05:47:24.687Z] {"type":"text_delta","delta":"Were"}
+[2026-04-29T05:47:24.713Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:47:24.739Z] {"type":"text_delta","delta":" asking"}
+[2026-04-29T05:47:24.767Z] {"type":"text_delta","delta":" about"}
+[2026-04-29T05:47:24.796Z] {"type":"text_delta","delta":" something"}
+[2026-04-29T05:47:24.824Z] {"type":"text_delta","delta":" specific"}
+[2026-04-29T05:47:24.849Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T05:47:24.902Z] {"type":"text_delta","delta":":\n\n"}
+[2026-04-29T05:47:24.928Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T05:47:24.956Z] {"type":"text_delta","delta":" How"}
+[2026-04-29T05:47:24.986Z] {"type":"text_delta","delta":" much"}
+[2026-04-29T05:47:25.013Z] {"type":"text_delta","delta":" context"}
+[2026-04-29T05:47:25.039Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:47:25.068Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:47:25.097Z] {"type":"text_delta","delta":" remember"}
+[2026-04-29T05:47:25.124Z] {"type":"text_delta","delta":"?\n"}
+[2026-04-29T05:47:25.152Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T05:47:25.184Z] {"type":"text_delta","delta":" Token"}
+[2026-04-29T05:47:25.208Z] {"type":"text_delta","delta":" limits"}
+[2026-04-29T05:47:25.497Z] {"type":"text_delta","delta":" for"}
+[2026-04-29T05:47:25.498Z] {"type":"text_delta","delta":" API"}
+[2026-04-29T05:47:25.907Z] {"type":"text_delta","delta":" usage"}
+[2026-04-29T05:47:26.316Z] {"type":"text_delta","delta":"?\n"}
+[2026-04-29T05:47:26.738Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T05:47:27.134Z] {"type":"text_delta","delta":" Something"}
+[2026-04-29T05:47:27.545Z] {"type":"text_delta","delta":" else"}
+[2026-04-29T05:47:27.953Z] {"type":"text_delta","delta":"?\n\n"}
+[2026-04-29T05:47:28.466Z] {"type":"text_delta","delta":"Let"}
+[2026-04-29T05:47:28.875Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:47:29.285Z] {"type":"text_delta","delta":" know"}
+[2026-04-29T05:47:29.797Z] {"type":"text_delta","delta":" and"}
+[2026-04-29T05:47:30.003Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T05:47:30.004Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T05:47:30.004Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:47:31.150Z] {"type":"text_delta","delta":" clarify"}
+[2026-04-29T05:47:31.151Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:47:31.156Z] {"type":"turn_end"}
+[2026-04-29T05:47:31.156Z] {"type":"agent_end"}
+[2026-04-29T05:47:31.242Z] {"kind":"response","command":"get_session_stats","id":"stats-2","success":true,"data":{"tokens":{"input":106,"output":333,"cache_read":0,"cache_write":0,"total":439},"context_usage":{"tokens":439,"limit":200000,"percent":0.2},"cost":0,"turns":2}}
+[2026-04-29T05:47:42.504Z] {"kind":"response","command":"prompt","id":"prompt-3","success":true}
+[2026-04-29T05:47:42.505Z] {"type":"turn_start"}
+[2026-04-29T05:47:53.049Z] Retrying in 2000ms (5 left)
+[2026-04-29T05:47:53.049Z] {"type":"cooldown","wait_ms":2000,"retries_left":5}
+[2026-04-29T05:47:55.051Z] {"type":"turn_start"}
+[2026-04-29T05:48:07.068Z] {"type":"text_delta","delta":"I'd"}
+[2026-04-29T05:48:07.102Z] {"type":"text_delta","delta":" be"}
+[2026-04-29T05:48:07.128Z] {"type":"text_delta","delta":" happy"}
+[2026-04-29T05:48:07.155Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:48:07.183Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:48:07.213Z] {"type":"text_delta","delta":" review"}
+[2026-04-29T05:48:07.243Z] {"type":"text_delta","delta":" your"}
+[2026-04-29T05:48:07.273Z] {"type":"text_delta","delta":" code"}
+[2026-04-29T05:48:07.307Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:48:07.333Z] {"type":"text_delta","delta":" Please"}
+[2026-04-29T05:48:07.358Z] {"type":"text_delta","delta":" share"}
+[2026-04-29T05:48:07.388Z] {"type":"text_delta","delta":" it"}
+[2026-04-29T05:48:07.418Z] {"type":"text_delta","delta":" here"}
+[2026-04-29T05:48:07.459Z] {"type":"text_delta","delta":" and"}
+[2026-04-29T05:48:07.479Z] {"type":"text_delta","delta":" let"}
+[2026-04-29T05:48:07.504Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:48:07.533Z] {"type":"text_delta","delta":" know"}
+[2026-04-29T05:48:07.564Z] {"type":"text_delta","delta":" what"}
+[2026-04-29T05:48:07.591Z] {"type":"text_delta","delta":" you'd"}
+[2026-04-29T05:48:07.621Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T05:48:07.652Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:48:07.682Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:48:07.710Z] {"type":"text_delta","delta":" look"}
+[2026-04-29T05:48:07.737Z] {"type":"text_delta","delta":" at"}
+[2026-04-29T05:48:07.769Z] {"type":"text_delta","delta":" ("}
+[2026-04-29T05:48:07.798Z] {"type":"text_delta","delta":"e"}
+[2026-04-29T05:48:07.826Z] {"type":"text_delta","delta":".g"}
+[2026-04-29T05:48:07.856Z] {"type":"text_delta","delta":".,"}
+[2026-04-29T05:48:07.886Z] {"type":"text_delta","delta":" bugs"}
+[2026-04-29T05:48:07.911Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:48:07.941Z] {"type":"text_delta","delta":" performance"}
+[2026-04-29T05:48:07.970Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:48:08.001Z] {"type":"text_delta","delta":" best"}
+[2026-04-29T05:48:08.028Z] {"type":"text_delta","delta":" practices"}
+[2026-04-29T05:48:08.058Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:48:08.091Z] {"type":"text_delta","delta":" security"}
+[2026-04-29T05:48:08.119Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:48:08.148Z] {"type":"text_delta","delta":" etc"}
+[2026-04-29T05:48:08.176Z] {"type":"text_delta","delta":".)."}
+[2026-04-29T05:48:08.214Z] {"type":"turn_end"}
+[2026-04-29T05:48:08.214Z] {"type":"agent_end"}
+[2026-04-29T05:48:08.330Z] {"kind":"response","command":"get_session_stats","id":"stats-3","success":true,"data":{"tokens":{"input":344,"output":406,"cache_read":0,"cache_write":0,"total":750},"context_usage":{"tokens":750,"limit":200000,"percent":0.4},"cost":0,"turns":3}}
+[2026-04-29T05:49:47.651Z] {"kind":"response","command":"prompt","id":"prompt-4","success":true}
+[2026-04-29T05:49:47.651Z] {"type":"turn_start"}
+[2026-04-29T05:49:59.209Z] {"type":"text_delta","delta":"No"}
+[2026-04-29T05:49:59.210Z] {"type":"text_delta","delta":" problem"}
+[2026-04-29T05:49:59.210Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:49:59.211Z] {"type":"text_delta","delta":" Whenever"}
+[2026-04-29T05:49:59.606Z] {"type":"text_delta","delta":" you're"}
+[2026-04-29T05:50:01.155Z] {"type":"text_delta","delta":" ready"}
+[2026-04-29T05:50:01.156Z] {"type":"text_delta","delta":","}
+[2026-04-29T05:50:01.156Z] {"type":"text_delta","delta":" just"}
+[2026-04-29T05:50:01.292Z] {"type":"text_delta","delta":" paste"}
+[2026-04-29T05:50:01.765Z] {"type":"text_delta","delta":" the"}
+[2026-04-29T05:50:02.272Z] {"type":"text_delta","delta":" code"}
+[2026-04-29T05:50:02.686Z] {"type":"text_delta","delta":" and"}
+[2026-04-29T05:50:02.687Z] {"type":"text_delta","delta":" let"}
+[2026-04-29T05:50:02.687Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:50:02.708Z] {"type":"text_delta","delta":" know"}
+[2026-04-29T05:50:02.732Z] {"type":"text_delta","delta":" what"}
+[2026-04-29T05:50:02.759Z] {"type":"text_delta","delta":" you'd"}
+[2026-04-29T05:50:02.790Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T05:50:02.821Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T05:50:02.843Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:50:02.891Z] {"type":"text_delta","delta":" check"}
+[2026-04-29T05:50:02.899Z] {"type":"text_delta","delta":"."}
+[2026-04-29T05:50:02.930Z] {"type":"text_delta","delta":" I'm"}
+[2026-04-29T05:50:02.952Z] {"type":"text_delta","delta":" here"}
+[2026-04-29T05:50:02.994Z] {"type":"text_delta","delta":" when"}
+[2026-04-29T05:50:03.006Z] {"type":"text_delta","delta":" you're"}
+[2026-04-29T05:50:03.034Z] {"type":"text_delta","delta":" ready"}
+[2026-04-29T05:50:03.079Z] {"type":"text_delta","delta":"."}
+[2026-04-29T05:50:03.089Z] {"type":"text_delta","delta":" 👍"}
+[2026-04-29T05:50:03.634Z] {"type":"turn_end"}
+[2026-04-29T05:50:03.634Z] {"type":"agent_end"}
+[2026-04-29T05:50:03.779Z] {"kind":"response","command":"get_session_stats","id":"stats-4","success":true,"data":{"tokens":{"input":632,"output":500,"cache_read":0,"cache_write":0,"total":1132},"context_usage":{"tokens":1132,"limit":200000,"percent":0.6},"cost":0,"turns":4}}
+[2026-04-29T05:53:47.867Z] {"kind":"response","command":"prompt","id":"prompt-5","success":true}
+[2026-04-29T05:53:47.868Z] {"type":"turn_start"}
+[2026-04-29T05:53:59.544Z] {"type":"text_delta","delta":"Got"}
+[2026-04-29T05:53:59.544Z] {"type":"text_delta","delta":" it"}
+[2026-04-29T05:53:59.545Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T05:53:59.583Z] {"type":"text_delta","delta":" Feel"}
+[2026-04-29T05:53:59.594Z] {"type":"text_delta","delta":" free"}
+[2026-04-29T05:53:59.621Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T05:53:59.847Z] {"type":"text_delta","delta":" come"}
+[2026-04-29T05:53:59.848Z] {"type":"text_delta","delta":" back"}
+[2026-04-29T05:54:00.254Z] {"type":"text_delta","delta":" anytime"}
+[2026-04-29T05:54:00.663Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T05:54:01.074Z] {"type":"text_delta","delta":" need"}
+[2026-04-29T05:54:01.484Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T05:54:01.893Z] {"type":"text_delta","delta":"."}
+[2026-04-29T05:54:02.306Z] {"type":"text_delta","delta":" Have"}
+[2026-04-29T05:54:02.711Z] {"type":"text_delta","delta":" a"}
+[2026-04-29T05:54:03.127Z] {"type":"text_delta","delta":" great"}
+[2026-04-29T05:54:03.642Z] {"type":"text_delta","delta":" one"}
+[2026-04-29T05:54:04.356Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T06:00:33.095Z] {"type":"agent_start"}
+[2026-04-29T06:00:33.107Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T06:00:35.466Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T06:00:35.468Z] {"type":"turn_start"}
+[2026-04-29T06:01:34.169Z] {"type":"text_delta","delta":"Hi"}
+[2026-04-29T06:01:34.203Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T06:01:34.230Z] {"type":"text_delta","delta":" How"}
+[2026-04-29T06:01:34.262Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T06:01:34.302Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T06:01:34.325Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T06:01:34.358Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:01:34.390Z] {"type":"text_delta","delta":" today"}
+[2026-04-29T06:01:34.419Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T06:01:34.456Z] {"type":"text_delta","delta":" Feel"}
+[2026-04-29T06:01:34.484Z] {"type":"text_delta","delta":" free"}
+[2026-04-29T06:01:34.518Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T06:01:34.547Z] {"type":"text_delta","delta":" ask"}
+[2026-04-29T06:01:34.580Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T06:01:34.612Z] {"type":"text_delta","delta":" anything"}
+[2026-04-29T06:01:34.648Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:01:34.699Z] {"type":"text_delta","delta":" let"}
+[2026-04-29T06:01:34.729Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T06:01:34.761Z] {"type":"text_delta","delta":" know"}
+[2026-04-29T06:01:34.792Z] {"type":"text_delta","delta":" what"}
+[2026-04-29T06:01:34.823Z] {"type":"text_delta","delta":" you'd"}
+[2026-04-29T06:01:34.859Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T06:01:34.887Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T06:01:34.919Z] {"type":"text_delta","delta":" work"}
+[2026-04-29T06:01:34.951Z] {"type":"text_delta","delta":" on"}
+[2026-04-29T06:01:34.982Z] {"type":"text_delta","delta":"."}
+[2026-04-29T06:01:35.917Z] {"type":"turn_end"}
+[2026-04-29T06:01:35.917Z] {"type":"agent_end"}
+[2026-04-29T06:01:35.993Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":39,"output":96,"cache_read":0,"cache_write":0,"total":135},"context_usage":{"tokens":135,"limit":200000,"percent":0.1},"cost":0,"turns":1}}
+[2026-04-29T06:01:45.351Z] {"kind":"response","command":"prompt","id":"prompt-2","success":true}
+[2026-04-29T06:01:45.352Z] {"type":"turn_start"}
+[2026-04-29T06:02:04.206Z] {"type":"text_delta","delta":"I'm"}
+[2026-04-29T06:02:04.615Z] {"type":"text_delta","delta":" doing"}
+[2026-04-29T06:02:05.127Z] {"type":"text_delta","delta":" well"}
+[2026-04-29T06:02:05.536Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:02:06.049Z] {"type":"text_delta","delta":" thanks"}
+[2026-04-29T06:02:06.472Z] {"type":"text_delta","delta":" for"}
+[2026-04-29T06:02:06.970Z] {"type":"text_delta","delta":" asking"}
+[2026-04-29T06:02:07.396Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T06:02:07.789Z] {"type":"text_delta","delta":" Ready"}
+[2026-04-29T06:02:08.309Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T06:02:08.711Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T06:02:09.121Z] {"type":"text_delta","delta":" with"}
+[2026-04-29T06:02:09.537Z] {"type":"text_delta","delta":" whatever"}
+[2026-04-29T06:02:09.939Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:02:11.097Z] {"type":"text_delta","delta":" need"}
+[2026-04-29T06:02:11.103Z] {"type":"text_delta","delta":" —"}
+[2026-04-29T06:02:11.190Z] {"type":"text_delta","delta":" whether"}
+[2026-04-29T06:02:11.680Z] {"type":"text_delta","delta":" that's"}
+[2026-04-29T06:02:12.090Z] {"type":"text_delta","delta":" coding"}
+[2026-04-29T06:02:12.499Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:02:13.012Z] {"type":"text_delta","delta":" answering"}
+[2026-04-29T06:02:13.422Z] {"type":"text_delta","delta":" questions"}
+[2026-04-29T06:02:13.830Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:02:14.240Z] {"type":"text_delta","delta":" brainstorming"}
+[2026-04-29T06:02:14.761Z] {"type":"text_delta","delta":" ideas"}
+[2026-04-29T06:02:15.181Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:02:15.674Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:02:16.185Z] {"type":"text_delta","delta":" something"}
+[2026-04-29T06:02:16.645Z] {"type":"text_delta","delta":" else"}
+[2026-04-29T06:02:17.147Z] {"type":"text_delta","delta":" entirely"}
+[2026-04-29T06:02:17.668Z] {"type":"text_delta","delta":".\n\n"}
+[2026-04-29T06:02:18.177Z] {"type":"text_delta","delta":"How"}
+[2026-04-29T06:02:18.701Z] {"type":"text_delta","delta":" are"}
+[2026-04-29T06:02:19.230Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:02:19.770Z] {"type":"text_delta","delta":" doing"}
+[2026-04-29T06:02:20.313Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T06:02:20.905Z] {"type":"turn_end"}
+[2026-04-29T06:02:20.905Z] {"type":"agent_end"}
+[2026-04-29T06:02:20.911Z] {"kind":"response","command":"get_session_stats","id":"stats-2","success":true,"data":{"tokens":{"input":117,"output":161,"cache_read":0,"cache_write":0,"total":278},"context_usage":{"tokens":278,"limit":200000,"percent":0.1},"cost":0,"turns":2}}
+[2026-04-29T06:02:29.695Z] {"kind":"response","command":"prompt","id":"prompt-3","success":true}
+[2026-04-29T06:02:29.695Z] {"type":"turn_start"}
+[2026-04-29T06:02:39.339Z] Retrying in 2000ms (5 left)
+[2026-04-29T06:02:39.340Z] {"type":"cooldown","wait_ms":2000,"retries_left":5}
+[2026-04-29T06:02:41.341Z] {"type":"turn_start"}
+[2026-04-29T06:03:11.153Z] {"type":"text_delta","delta":"I"}
+[2026-04-29T06:03:11.177Z] {"type":"text_delta","delta":" can't"}
+[2026-04-29T06:03:11.204Z] {"type":"text_delta","delta":" modify"}
+[2026-04-29T06:03:11.234Z] {"type":"text_delta","delta":" my"}
+[2026-04-29T06:03:11.260Z] {"type":"text_delta","delta":" own"}
+[2026-04-29T06:03:11.289Z] {"type":"text_delta","delta":" underlying"}
+[2026-04-29T06:03:11.317Z] {"type":"text_delta","delta":" code"}
+[2026-04-29T06:03:11.344Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:03:11.380Z] {"type":"text_delta","delta":" architecture"}
+[2026-04-29T06:03:11.402Z] {"type":"text_delta","delta":" —"}
+[2026-04-29T06:03:11.428Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T06:03:11.456Z] {"type":"text_delta","delta":" don't"}
+[2026-04-29T06:03:11.484Z] {"type":"text_delta","delta":" have"}
+[2026-04-29T06:03:11.512Z] {"type":"text_delta","delta":" access"}
+[2026-04-29T06:03:11.540Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T06:03:11.568Z] {"type":"text_delta","delta":" my"}
+[2026-04-29T06:03:11.599Z] {"type":"text_delta","delta":" own"}
+[2026-04-29T06:03:11.622Z] {"type":"text_delta","delta":" model"}
+[2026-04-29T06:03:11.654Z] {"type":"text_delta","delta":" weights"}
+[2026-04-29T06:03:11.682Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:03:11.708Z] {"type":"text_delta","delta":" the"}
+[2026-04-29T06:03:11.733Z] {"type":"text_delta","delta":" ability"}
+[2026-04-29T06:03:11.760Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T06:03:11.789Z] {"type":"text_delta","delta":" change"}
+[2026-04-29T06:03:11.816Z] {"type":"text_delta","delta":" how"}
+[2026-04-29T06:03:11.841Z] {"type":"text_delta","delta":" I'm"}
+[2026-04-29T06:03:11.869Z] {"type":"text_delta","delta":" built"}
+[2026-04-29T06:03:11.896Z] {"type":"text_delta","delta":".\n\n"}
+[2026-04-29T06:03:11.923Z] {"type":"text_delta","delta":"However"}
+[2026-04-29T06:03:11.950Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:11.977Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T06:03:12.005Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T06:03:12.032Z] {"type":"text_delta","delta":" adapt"}
+[2026-04-29T06:03:12.506Z] {"type":"text_delta","delta":" in"}
+[2026-04-29T06:03:12.916Z] {"type":"text_delta","delta":" other"}
+[2026-04-29T06:03:13.334Z] {"type":"text_delta","delta":" ways"}
+[2026-04-29T06:03:13.735Z] {"type":"text_delta","delta":" during"}
+[2026-04-29T06:03:14.144Z] {"type":"text_delta","delta":" our"}
+[2026-04-29T06:03:14.555Z] {"type":"text_delta","delta":" conversation"}
+[2026-04-29T06:03:15.065Z] {"type":"text_delta","delta":":\n\n"}
+[2026-04-29T06:03:15.435Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T06:03:15.820Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T06:03:16.298Z] {"type":"text_delta","delta":"Adjust"}
+[2026-04-29T06:03:16.707Z] {"type":"text_delta","delta":" my"}
+[2026-04-29T06:03:17.217Z] {"type":"text_delta","delta":" communication"}
+[2026-04-29T06:03:17.627Z] {"type":"text_delta","delta":" style"}
+[2026-04-29T06:03:18.139Z] {"type":"text_delta","delta":"**"}
+[2026-04-29T06:03:18.567Z] {"type":"text_delta","delta":" —"}
+[2026-04-29T06:03:19.062Z] {"type":"text_delta","delta":" more"}
+[2026-04-29T06:03:19.572Z] {"type":"text_delta","delta":" formal"}
+[2026-04-29T06:03:21.109Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:21.109Z] {"type":"text_delta","delta":" casual"}
+[2026-04-29T06:03:21.109Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:21.621Z] {"type":"text_delta","delta":" concise"}
+[2026-04-29T06:03:22.085Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:22.643Z] {"type":"text_delta","delta":" detailed"}
+[2026-04-29T06:03:23.156Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:23.703Z] {"type":"text_delta","delta":" etc"}
+[2026-04-29T06:03:24.260Z] {"type":"text_delta","delta":".\n"}
+[2026-04-29T06:03:24.896Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T06:03:25.380Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T06:03:25.952Z] {"type":"text_delta","delta":"Explain"}
+[2026-04-29T06:03:26.638Z] {"type":"text_delta","delta":" things"}
+[2026-04-29T06:03:27.123Z] {"type":"text_delta","delta":" differently"}
+[2026-04-29T06:03:27.717Z] {"type":"text_delta","delta":"**"}
+[2026-04-29T06:03:28.384Z] {"type":"text_delta","delta":" —"}
+[2026-04-29T06:03:28.993Z] {"type":"text_delta","delta":" if"}
+[2026-04-29T06:03:29.481Z] {"type":"text_delta","delta":" something"}
+[2026-04-29T06:03:30.017Z] {"type":"text_delta","delta":" isn't"}
+[2026-04-29T06:03:30.427Z] {"type":"text_delta","delta":" clear"}
+[2026-04-29T06:03:30.845Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:31.356Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T06:03:31.861Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T06:03:32.302Z] {"type":"text_delta","delta":" re"}
+[2026-04-29T06:03:32.798Z] {"type":"text_delta","delta":"phrase"}
+[2026-04-29T06:03:33.308Z] {"type":"text_delta","delta":"\n"}
+[2026-04-29T06:03:33.830Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T06:03:34.347Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T06:03:34.831Z] {"type":"text_delta","delta":"Remember"}
+[2026-04-29T06:03:35.241Z] {"type":"text_delta","delta":" context"}
+[2026-04-29T06:03:35.649Z] {"type":"text_delta","delta":"**"}
+[2026-04-29T06:03:36.058Z] {"type":"text_delta","delta":" within"}
+[2026-04-29T06:03:36.468Z] {"type":"text_delta","delta":" our"}
+[2026-04-29T06:03:36.980Z] {"type":"text_delta","delta":" current"}
+[2026-04-29T06:03:37.395Z] {"type":"text_delta","delta":" conversation"}
+[2026-04-29T06:03:37.799Z] {"type":"text_delta","delta":"\n"}
+[2026-04-29T06:03:38.209Z] {"type":"text_delta","delta":"-"}
+[2026-04-29T06:03:38.722Z] {"type":"text_delta","delta":" **"}
+[2026-04-29T06:03:39.131Z] {"type":"text_delta","delta":"Take"}
+[2026-04-29T06:03:39.644Z] {"type":"text_delta","delta":" direction"}
+[2026-04-29T06:03:40.061Z] {"type":"text_delta","delta":"**"}
+[2026-04-29T06:03:40.565Z] {"type":"text_delta","delta":" on"}
+[2026-04-29T06:03:41.077Z] {"type":"text_delta","delta":" tone"}
+[2026-04-29T06:03:41.541Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:42.045Z] {"type":"text_delta","delta":" format"}
+[2026-04-29T06:03:42.559Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:43.079Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:03:43.607Z] {"type":"text_delta","delta":" approach"}
+[2026-04-29T06:03:44.148Z] {"type":"text_delta","delta":"\n\n"}
+[2026-04-29T06:03:44.689Z] {"type":"text_delta","delta":"Is"}
+[2026-04-29T06:03:45.236Z] {"type":"text_delta","delta":" there"}
+[2026-04-29T06:03:45.889Z] {"type":"text_delta","delta":" something"}
+[2026-04-29T06:03:46.354Z] {"type":"text_delta","delta":" specific"}
+[2026-04-29T06:03:47.016Z] {"type":"text_delta","delta":" you'd"}
+[2026-04-29T06:03:47.505Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T06:03:48.045Z] {"type":"text_delta","delta":" me"}
+[2026-04-29T06:03:48.046Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T06:03:48.076Z] {"type":"text_delta","delta":" do"}
+[2026-04-29T06:03:48.101Z] {"type":"text_delta","delta":" differently"}
+[2026-04-29T06:03:48.132Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:03:48.164Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:03:48.199Z] {"type":"text_delta","delta":" were"}
+[2026-04-29T06:03:48.220Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:03:48.249Z] {"type":"text_delta","delta":" asking"}
+[2026-04-29T06:03:48.279Z] {"type":"text_delta","delta":" about"}
+[2026-04-29T06:03:48.308Z] {"type":"text_delta","delta":" something"}
+[2026-04-29T06:03:48.338Z] {"type":"text_delta","delta":" else"}
+[2026-04-29T06:03:48.382Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T06:03:48.408Z] {"type":"retry_result","success":true,"attempt":2}
+[2026-04-29T06:03:48.408Z] {"type":"turn_end"}
+[2026-04-29T06:03:48.408Z] {"type":"agent_end"}
+[2026-04-29T06:03:48.432Z] {"kind":"response","command":"get_session_stats","id":"stats-3","success":true,"data":{"tokens":{"input":248,"output":405,"cache_read":0,"cache_write":0,"total":653},"context_usage":{"tokens":653,"limit":200000,"percent":0.3},"cost":0,"turns":3}}
+[2026-04-29T06:13:48.900Z] {"type":"agent_start"}
+[2026-04-29T06:13:48.916Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T06:13:51.021Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T06:13:51.022Z] {"type":"turn_start"}
+[2026-04-29T06:14:11.884Z] {"type":"text_delta","delta":"Hi"}
+[2026-04-29T06:14:12.897Z] {"type":"text_delta","delta":" there"}
+[2026-04-29T06:14:13.917Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T06:14:16.070Z] {"type":"text_delta","delta":" 👋"}
+[2026-04-29T06:14:17.101Z] {"type":"text_delta","delta":" How"}
+[2026-04-29T06:14:18.118Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T06:14:19.125Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T06:14:20.064Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T06:14:20.900Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:14:21.805Z] {"type":"text_delta","delta":" today"}
+[2026-04-29T06:14:22.727Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T06:14:23.659Z] {"type":"turn_end"}
+[2026-04-29T06:14:23.659Z] {"type":"agent_end"}
+[2026-04-29T06:14:23.753Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":39,"output":48,"cache_read":0,"cache_write":0,"total":87},"context_usage":{"tokens":87,"limit":200000,"percent":0},"cost":0,"turns":1}}
+[2026-04-29T06:14:31.152Z] {"kind":"response","command":"prompt","id":"prompt-2","success":true}
+[2026-04-29T06:14:31.152Z] {"type":"turn_start"}
+[2026-04-29T06:14:36.396Z] {"type":"text_delta","delta":"Hey"}
+[2026-04-29T06:14:36.423Z] {"type":"text_delta","delta":"!"}
+[2026-04-29T06:14:36.477Z] {"type":"text_delta","delta":" 😄"}
+[2026-04-29T06:14:36.506Z] {"type":"text_delta","delta":" I'm"}
+[2026-04-29T06:14:36.541Z] {"type":"text_delta","delta":" doing"}
+[2026-04-29T06:14:36.566Z] {"type":"text_delta","delta":" great"}
+[2026-04-29T06:14:36.599Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:14:36.621Z] {"type":"text_delta","delta":" thanks"}
+[2026-04-29T06:14:36.648Z] {"type":"text_delta","delta":" for"}
+[2026-04-29T06:14:36.674Z] {"type":"text_delta","delta":" asking"}
+[2026-04-29T06:14:36.704Z] {"type":"text_delta","delta":"!\n\n"}
+[2026-04-29T06:14:36.730Z] {"type":"text_delta","delta":"I'm"}
+[2026-04-29T06:14:36.776Z] {"type":"text_delta","delta":" just"}
+[2026-04-29T06:14:36.839Z] {"type":"text_delta","delta":" a"}
+[2026-04-29T06:14:36.865Z] {"type":"text_delta","delta":" bunch"}
+[2026-04-29T06:14:36.894Z] {"type":"text_delta","delta":" of"}
+[2026-04-29T06:14:37.377Z] {"type":"text_delta","delta":" code"}
+[2026-04-29T06:14:37.377Z] {"type":"text_delta","delta":" and"}
+[2026-04-29T06:14:37.378Z] {"type":"text_delta","delta":" patterns"}
+[2026-04-29T06:14:37.384Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:14:37.411Z] {"type":"text_delta","delta":" so"}
+[2026-04-29T06:14:37.439Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T06:14:37.471Z] {"type":"text_delta","delta":" don't"}
+[2026-04-29T06:14:37.500Z] {"type":"text_delta","delta":" really"}
+[2026-04-29T06:14:37.528Z] {"type":"text_delta","delta":" have"}
+[2026-04-29T06:14:37.558Z] {"type":"text_delta","delta":" good"}
+[2026-04-29T06:14:37.594Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:14:37.618Z] {"type":"text_delta","delta":" bad"}
+[2026-04-29T06:14:37.648Z] {"type":"text_delta","delta":" days"}
+[2026-04-29T06:14:37.679Z] {"type":"text_delta","delta":" like"}
+[2026-04-29T06:14:37.706Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:14:37.735Z] {"type":"text_delta","delta":" do"}
+[2026-04-29T06:14:37.767Z] {"type":"text_delta","delta":" —"}
+[2026-04-29T06:14:37.793Z] {"type":"text_delta","delta":" but"}
+[2026-04-29T06:14:37.821Z] {"type":"text_delta","delta":" I'm"}
+[2026-04-29T06:14:37.851Z] {"type":"text_delta","delta":" here"}
+[2026-04-29T06:14:37.879Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:14:37.908Z] {"type":"text_delta","delta":" ready"}
+[2026-04-29T06:14:37.951Z] {"type":"text_delta","delta":" to"}
+[2026-04-29T06:14:37.967Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T06:14:37.998Z] {"type":"text_delta","delta":" with"}
+[2026-04-29T06:14:38.024Z] {"type":"text_delta","delta":" whatever"}
+[2026-04-29T06:14:38.106Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:14:38.131Z] {"type":"text_delta","delta":" need"}
+[2026-04-29T06:14:38.600Z] {"type":"text_delta","delta":"."}
+[2026-04-29T06:14:39.008Z] {"type":"text_delta","delta":" Whether"}
+[2026-04-29T06:14:39.420Z] {"type":"text_delta","delta":" that's"}
+[2026-04-29T06:14:39.827Z] {"type":"text_delta","delta":" coding"}
+[2026-04-29T06:14:40.034Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:14:40.035Z] {"type":"text_delta","delta":" answering"}
+[2026-04-29T06:14:40.035Z] {"type":"text_delta","delta":" questions"}
+[2026-04-29T06:14:41.159Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:14:41.159Z] {"type":"text_delta","delta":" brainstorming"}
+[2026-04-29T06:14:41.161Z] {"type":"text_delta","delta":" ideas"}
+[2026-04-29T06:14:41.161Z] {"type":"text_delta","delta":","}
+[2026-04-29T06:14:41.162Z] {"type":"text_delta","delta":" or"}
+[2026-04-29T06:14:41.163Z] {"type":"text_delta","delta":" just"}
+[2026-04-29T06:14:41.163Z] {"type":"text_delta","delta":" chatting"}
+[2026-04-29T06:14:41.163Z] {"type":"text_delta","delta":".\n\n"}
+[2026-04-29T06:14:41.163Z] {"type":"text_delta","delta":"How"}
+[2026-04-29T06:14:41.164Z] {"type":"text_delta","delta":" are"}
+[2026-04-29T06:14:41.164Z] {"type":"text_delta","delta":" *"}
+[2026-04-29T06:14:41.164Z] {"type":"text_delta","delta":"you"}
+[2026-04-29T06:14:41.164Z] {"type":"text_delta","delta":"*"}
+[2026-04-29T06:14:41.164Z] {"type":"text_delta","delta":" doing"}
+[2026-04-29T06:14:41.164Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T06:14:41.164Z] {"type":"text_delta","delta":" Anything"}
+[2026-04-29T06:14:41.165Z] {"type":"text_delta","delta":" I"}
+[2026-04-29T06:14:41.165Z] {"type":"text_delta","delta":" can"}
+[2026-04-29T06:14:41.165Z] {"type":"text_delta","delta":" help"}
+[2026-04-29T06:14:41.165Z] {"type":"text_delta","delta":" you"}
+[2026-04-29T06:14:41.165Z] {"type":"text_delta","delta":" with"}
+[2026-04-29T06:14:41.166Z] {"type":"text_delta","delta":"?"}
+[2026-04-29T06:14:41.167Z] {"type":"turn_end"}
+[2026-04-29T06:14:41.167Z] {"type":"agent_end"}
+[2026-04-29T06:14:41.291Z] {"kind":"response","command":"get_session_stats","id":"stats-2","success":true,"data":{"tokens":{"input":107,"output":156,"cache_read":0,"cache_write":0,"total":263},"context_usage":{"tokens":263,"limit":200000,"percent":0.1},"cost":0,"turns":2}}
+[2026-04-29T06:15:58.588Z] {"kind":"response","command":"prompt","id":"prompt-3","success":true}
+[2026-04-29T06:15:58.588Z] {"type":"turn_start"}
+[2026-04-29T06:17:48.015Z] {"type":"agent_start"}
+[2026-04-29T06:17:48.023Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"minimax/minimax-m2.5:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T06:17:50.711Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T06:17:50.712Z] {"type":"turn_start"}
+[2026-04-29T06:19:55.353Z] {"type":"turn_end"}
+[2026-04-29T06:19:55.353Z] {"type":"agent_end"}
+[2026-04-29T06:19:55.432Z] {"kind":"response","command":"get_session_stats","id":"stats-1","success":true,"data":{"tokens":{"input":null,"output":null,"cache_read":0,"cache_write":0,"total":null},"context_usage":{"tokens":null,"limit":200000,"percent":null},"cost":null,"turns":1}}
+[2026-04-29T06:20:07.008Z] {"type":"agent_start"}
+[2026-04-29T06:20:07.016Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"google/gemma-4-31b-it:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T06:20:08.655Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T06:20:08.657Z] {"type":"turn_start"}
+[2026-04-29T06:20:16.334Z] Retrying in 2000ms (5 left)
+[2026-04-29T06:20:16.334Z] {"type":"cooldown","wait_ms":2000,"retries_left":5}
+[2026-04-29T06:20:18.335Z] {"type":"turn_start"}
+[2026-04-29T06:20:25.641Z] Retrying in 4000ms (4 left)
+[2026-04-29T06:20:25.641Z] {"type":"cooldown","wait_ms":4000,"retries_left":4}
+[2026-04-29T06:20:29.643Z] {"type":"turn_start"}
+[2026-04-29T06:20:36.909Z] Retrying in 8000ms (3 left)
+[2026-04-29T06:20:36.909Z] {"type":"cooldown","wait_ms":8000,"retries_left":3}
+[2026-04-29T06:20:44.911Z] {"type":"turn_start"}
+[2026-04-29T06:20:52.060Z] Retrying in 16000ms (2 left)
+[2026-04-29T06:20:52.061Z] {"type":"cooldown","wait_ms":16000,"retries_left":2}
+[2026-04-29T06:21:08.061Z] {"type":"turn_start"}
+[2026-04-29T06:24:30.873Z] {"type":"agent_start"}
+[2026-04-29T06:24:30.885Z] {"kind":"response","command":"get_state","id":"startup-state","success":true,"data":{"model_name":"google/gemma-4-31b-it:free","model_limit":200000,"temp":0.3,"is_streaming":false}}
+[2026-04-29T06:24:35.362Z] {"kind":"response","command":"prompt","id":"prompt-1","success":true}
+[2026-04-29T06:24:35.363Z] {"type":"turn_start"}
+[2026-04-29T06:24:43.089Z] Retrying in 2000ms (5 left)
+[2026-04-29T06:24:43.089Z] {"type":"cooldown","wait_ms":2000,"retries_left":5}
+[2026-04-29T06:24:45.089Z] {"type":"turn_start"}
+[2026-04-29T06:24:52.409Z] Retrying in 4000ms (4 left)
+[2026-04-29T06:24:52.409Z] {"type":"cooldown","wait_ms":4000,"retries_left":4}
+[2026-04-29T06:24:56.410Z] {"type":"turn_start"}
+[2026-04-29T06:25:03.629Z] Retrying in 8000ms (3 left)
+[2026-04-29T06:25:03.630Z] {"type":"cooldown","wait_ms":8000,"retries_left":3}
+[2026-04-29T06:25:11.631Z] {"type":"turn_start"}
+[2026-04-29T06:25:19.023Z] Retrying in 16000ms (2 left)
+[2026-04-29T06:25:19.023Z] {"type":"cooldown","wait_ms":16000,"retries_left":2}
