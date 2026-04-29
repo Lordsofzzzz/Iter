@@ -27,9 +27,6 @@ const TOKEN_BREAKDOWN_HEIGHT: u16 = 8;
 /// Height of the session stats section.
 const SESSION_STATS_HEIGHT: u16 = 7;
 
-/// Minimum height for model info section.
-const MODEL_INFO_MIN_HEIGHT: u16 = 6;
-
 
 
 // ============================================================================
@@ -57,14 +54,12 @@ impl<'a> Widget for ContextPanel<'a> {
                 Constraint::Length(CONTEXT_GAUGE_HEIGHT),
                 Constraint::Length(TOKEN_BREAKDOWN_HEIGHT),
                 Constraint::Length(SESSION_STATS_HEIGHT),
-                Constraint::Min(MODEL_INFO_MIN_HEIGHT),
             ])
             .split(inner);
 
         self.render_context_gauge(chunks[0], buf);
         self.render_token_breakdown(chunks[1], buf);
         self.render_session_stats(chunks[2], buf);
-        self.render_model_info(chunks[3], buf);
     }
 }
 
@@ -138,31 +133,7 @@ impl<'a> ContextPanel<'a> {
         Paragraph::new(sess_lines).render(inner, buf);
     }
 
-    /// Renders model configuration info.
-    fn render_model_info(&self, area: Rect, buf: &mut Buffer) {
-        let block = Block::default()
-            .title(" Model ")
-            .borders(Borders::ALL)
-            .border_style(theme::BORDER);
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        let status_style = match self.app.model_status {
-            ModelStatus::Ready    => theme::MODEL_READY,
-            ModelStatus::Thinking => theme::MODEL_THINKING,
-            ModelStatus::Error    => theme::MODEL_ERROR,
-            ModelStatus::Cooldown => theme::MODEL_COOLDOWN,
-        };
-
-        let model_lines = vec![
-            stat_row("name  ", self.app.model_name.clone(), theme::MODEL_NAME),
-            stat_row("limit ", format!("{}k", self.app.model_limit / 1000), theme::MODEL_LIMIT),
-            stat_row("temp  ", format!("{:.1}", self.app.model_temp), theme::MODEL_TEMP),
-            stat_row("status", self.app.model_status.label().to_string(), status_style),
-        ];
-        Paragraph::new(model_lines).render(inner, buf);
     }
-}
 
 // ============================================================================
 // Private Helpers
