@@ -98,8 +98,6 @@ impl<'a> ContextPanel<'a> {
         let tok_lines = vec![
             token_row("input  ", self.app.tok_input, theme::TOK_INPUT),
             token_row("output ", self.app.tok_output, theme::TOK_OUTPUT),
-            token_row("$cache↑", self.app.tok_cache_write, theme::TOK_CACHE_WRITE),
-            token_row("$cache↓", self.app.tok_cache_read, theme::TOK_CACHE_READ),
             Line::from(vec![
                 Span::styled(" ─────────────────", theme::DIM),
             ]),
