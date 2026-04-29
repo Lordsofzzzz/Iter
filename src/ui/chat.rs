@@ -70,29 +70,6 @@ impl<'a> Widget for ChatPanel<'a> {
             render_message(msg, self.app, width, &mut lines);
         }
 
-        // Show breathing animation while agent is streaming.
-        if self.app.streaming {
-            if let Some(elapsed_ms) = self.app.streaming_elapsed_ms() {
-                let frame = get_breathing_frame(elapsed_ms);
-                let (char1, status1) = frame;
-                let (_, status2) = get_breathing_frame(elapsed_ms.saturating_sub(150));
-                let (_, status3) = get_breathing_frame(elapsed_ms.saturating_sub(300));
-
-                lines.push(Line::from(vec![
-                    Span::raw(ASSISTANT_INDENT),
-                    Span::styled(format!("{} {}...", char1, status1), theme::ACCENT),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::raw(ASSISTANT_INDENT),
-                    Span::styled(format!("  {}...", status2), theme::DIM),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::raw(ASSISTANT_INDENT),
-                    Span::styled(format!("  {}...", status3), theme::DIM),
-                ]));
-            }
-        }
-
         // Apply scrolling offset.
         let total_lines = lines.len() as u16;
         let visible = inner.height;

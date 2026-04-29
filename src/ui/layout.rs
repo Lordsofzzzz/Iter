@@ -23,6 +23,9 @@ const HEADER_HEIGHT: u16 = 1;
 /// Height of the hints bar.
 const HINTS_HEIGHT: u16 = 2;
 
+/// Height of the animation area.
+const ANIMATION_HEIGHT: u16 = 1;
+
 /// Height of the input area.
 const INPUT_HEIGHT: u16 = 3;
 
@@ -40,13 +43,14 @@ const CONTEXT_PANEL_WIDTH_PCT: u16 = 25;
 pub fn ui(f: &mut Frame, app: &App) {
     let size = f.area();
 
-    // Vertical layout: header, main content, hints, input.
+    // Vertical layout: header, main content, hints, animation, input.
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(HEADER_HEIGHT),
             Constraint::Min(0),
             Constraint::Length(HINTS_HEIGHT),
+            Constraint::Length(ANIMATION_HEIGHT),
             Constraint::Length(INPUT_HEIGHT),
         ])
         .split(size);
@@ -93,9 +97,44 @@ pub fn ui(f: &mut Frame, app: &App) {
     .block(Block::default().borders(Borders::TOP).border_style(theme::BORDER));
     f.render_widget(hints, root[2]);
 
+    // ── THINKING ANIMATION ────────────────────────────────────────────────
+    if app.streaming {
+        if let Some(elapsed_ms) = app.streaming_elapsed_ms() {
+            let frame = get_breathing_frame(elapsed_ms);
+            let (char1, status) = frame;
+            let anim = Paragraph::new(Line::from(vec![
+                Span::styled(format!("{} {}...", char1, status), theme::ACCENT),
+            ]));
+            f.render_widget(anim, root[3]);
+        }
+    }
+
     // ── INPUT ──────────────────────────────────────────────────────────────
     let input_widget = Paragraph::new(format!(" ❯ {}_", app.input))
         .style(ratatui::style::Style::new().fg(ratatui::style::Color::White))
         .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT));
-    f.render_widget(input_widget, root[3]);
+    f.render_widget(input_widget, root[4]);
+}
+
+// ============================================================================
+// Private Helpers
+// ============================================================================
+
+fn get_breathing_frame(elapsed_ms: u64) -> (char, &'static str) {
+    const FRAMES: [(char, &str); 12] = [
+        ('▖', "thinking"),
+        ('▗', "thinking"),
+        ('▘', "processing"),
+        ('▙', "processing"),
+        ('▚', "generating"),
+        ('▛', "generating"),
+        ('▜', "computing"),
+        ('▝', "computing"),
+        ('▞', "creating"),
+        ('▟', "creating"),
+        ('▧', "finalizing"),
+        ('▦', "finalizing"),
+    ];
+    let idx = (elapsed_ms / 150) as usize % FRAMES.len();
+    FRAMES[idx]
 }
