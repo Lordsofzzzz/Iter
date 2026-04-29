@@ -8,9 +8,9 @@ use std::time::Instant;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Modifier,
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Block, Borders, BorderType, Paragraph, Widget},
 };
 
 use crate::state::{App, MsgKind};
@@ -119,35 +119,62 @@ fn render_message<'a>(msg: &'a crate::state::ChatMessage, app: &'a crate::state:
     }
 }
 
-/// Renders a user message with input prefix.
+/// Renders a user message with bubble styling.
 fn render_user_message(content: &str, width: usize, out: &mut Vec<Line>) {
-    out.push(Line::default()); // Empty line before user message.
+    out.push(Line::default());
 
-    let content_width = width.saturating_sub(USER_PREFIX.chars().count());
-    for (i, chunk) in wrap_text(content, content_width).into_iter().enumerate() {
-        if i == 0 {
-            out.push(Line::from(vec![
-                Span::styled(USER_PREFIX, theme::ACCENT.add_modifier(Modifier::BOLD)),
-                Span::styled(chunk, theme::USER),
-            ]));
-        } else {
-            out.push(Line::from(vec![
-                Span::raw("    "),
-                Span::styled(chunk, theme::USER),
-            ]));
-        }
+    let inner_content_width = width.saturating_sub(USER_PREFIX.chars().count() + 4);
+    let wrapped = wrap_text(content, inner_content_width);
+
+    let border_color = theme::BUBBLE_USER_BORDER.fg.unwrap_or(Color::Cyan);
+
+    out.push(Line::from(vec![
+        Span::styled("┌─", Style::new().fg(border_color)),
+        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+    ]));
+
+    for (i, chunk) in wrapped.into_iter().enumerate() {
+        let prefix = if i == 0 { USER_PREFIX } else { "│ " };
+        out.push(Line::from(vec![
+            Span::styled("│ ", Style::new().fg(border_color)),
+            Span::styled(prefix, theme::ACCENT.add_modifier(Modifier::BOLD)),
+            Span::styled(chunk, theme::USER),
+        ]));
     }
+
+    out.push(Line::from(vec![
+        Span::styled("└─", Style::new().fg(border_color)),
+        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+    ]));
 }
 
-/// Renders assistant message with indentation.
+/// Renders assistant message with bubble styling.
 fn render_assistant_message(content: &str, width: usize, out: &mut Vec<Line>) {
-    let content_width = width.saturating_sub(ASSISTANT_INDENT.chars().count());
-    for chunk in wrap_text(content, content_width) {
+    out.push(Line::default());
+
+    let inner_content_width = width.saturating_sub(ASSISTANT_INDENT.chars().count() + 4);
+    let wrapped = wrap_text(content, inner_content_width);
+
+    let border_color = theme::BUBBLE_ASSISTANT_BORDER.fg.unwrap_or(Color::Green);
+
+    out.push(Line::from(vec![
+        Span::styled("┌─", Style::new().fg(border_color)),
+        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+    ]));
+
+    for (i, chunk) in wrapped.into_iter().enumerate() {
+        let prefix = if i == 0 { ASSISTANT_INDENT } else { "│   " };
         out.push(Line::from(vec![
-            Span::raw(ASSISTANT_INDENT),
+            Span::styled("│ ", Style::new().fg(border_color)),
+            Span::styled(prefix, theme::DIM),
             Span::styled(chunk, theme::ASSISTANT),
         ]));
     }
+
+    out.push(Line::from(vec![
+        Span::styled("└─", Style::new().fg(border_color)),
+        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+    ]));
 }
 
 /// Renders a tool call message.

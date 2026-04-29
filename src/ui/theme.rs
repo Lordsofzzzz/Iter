@@ -19,11 +19,20 @@ pub const LABEL: Style = Style::new().fg(Color::DarkGray);
 /// User message style (white, bold).
 pub const USER: Style = Style::new().fg(Color::White).add_modifier(Modifier::BOLD);
 
-/// Assistant/AI response style (gray).
-pub const ASSISTANT: Style = Style::new().fg(Color::Gray);
+/// Assistant/AI response style (light green).
+pub const ASSISTANT: Style = Style::new().fg(Color::LightGreen);
 
 /// System message style (dark gray).
 pub const SYSTEM: Style = Style::new().fg(Color::DarkGray);
+
+// ============================================================================
+// Chat Bubble Styles
+// ============================================================================
+
+pub const BUBBLE_USER_BG: Style = Style::new().fg(Color::White).bg(Color::DarkGray);
+pub const BUBBLE_ASSISTANT_BG: Style = Style::new().fg(Color::LightGreen).bg(Color::Black);
+pub const BUBBLE_USER_BORDER: Style = Style::new().fg(Color::Cyan);
+pub const BUBBLE_ASSISTANT_BORDER: Style = Style::new().fg(Color::Green);
 
 // ============================================================================
 // Accent Colors
