@@ -1,5 +1,7 @@
 # Iter Coding Agent
 
+> ⚠️ **Status: In Development** - This project is under active development and may have breaking changes.
+
 A terminal-based AI coding assistant with a Rust TUI frontend and TypeScript agent backend.
 
 ## Overview
@@ -146,6 +148,13 @@ Default settings in `agent/src/llm/client.ts`:
 - Model: `google/gemma-4-31b-it:free`
 - Context: 200k tokens
 - Temperature: 0.3
+
+## Development Notice
+
+This project is in active development. Expect:
+- Breaking changes to internal APIs
+- Incomplete features
+- Evolving documentation
 
 ## License
 
