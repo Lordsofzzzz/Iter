@@ -20,11 +20,8 @@ use crate::ui::theme;
 /// Height of the header bar.
 const HEADER_HEIGHT: u16 = 1;
 
-/// Height of the hints bar.
-const HINTS_HEIGHT: u16 = 2;
-
 /// Height of the animation area.
-const ANIMATION_HEIGHT: u16 = 1;
+const ANIMATION_HEIGHT: u16 = 2;
 
 /// Height of the input area.
 const INPUT_HEIGHT: u16 = 3;
@@ -43,13 +40,12 @@ const CONTEXT_PANEL_WIDTH_PCT: u16 = 25;
 pub fn ui(f: &mut Frame, app: &App) {
     let size = f.area();
 
-    // Vertical layout: header, main content, hints, animation, input.
+    // Vertical layout: header, main content, animation, input.
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(HEADER_HEIGHT),
             Constraint::Min(0),
-            Constraint::Length(HINTS_HEIGHT),
             Constraint::Length(ANIMATION_HEIGHT),
             Constraint::Length(INPUT_HEIGHT),
         ])
@@ -87,16 +83,6 @@ pub fn ui(f: &mut Frame, app: &App) {
     f.render_widget(ChatPanel { app }, cols[0]);
     f.render_widget(ContextPanel { app }, cols[1]);
 
-    // ── HINTS BAR ──────────────────────────────────────────────────────────
-    let hints = Paragraph::new(Line::from(vec![
-        Span::styled(" /clear  ", theme::DIM),
-        Span::styled("PgUp/PgDn  ", theme::DIM),
-        Span::styled("Ctrl+U clear input  ", theme::DIM),
-        Span::styled("Ctrl+C exit", theme::DIM),
-    ]))
-    .block(Block::default().borders(Borders::TOP).border_style(theme::BORDER));
-    f.render_widget(hints, root[2]);
-
     // ── THINKING ANIMATION ────────────────────────────────────────────────
     if app.streaming {
         if let Some(elapsed_ms) = app.streaming_elapsed_ms() {
@@ -105,7 +91,7 @@ pub fn ui(f: &mut Frame, app: &App) {
             let anim = Paragraph::new(Line::from(vec![
                 Span::styled(format!(" {} {}...", char1, status), theme::ACCENT),
             ]));
-            f.render_widget(anim, root[3]);
+            f.render_widget(anim, root[2]);
         }
     }
 
@@ -113,7 +99,7 @@ pub fn ui(f: &mut Frame, app: &App) {
     let input_widget = Paragraph::new(format!(" ❯ {}_", app.input))
         .style(ratatui::style::Style::new().fg(ratatui::style::Color::White))
         .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT));
-    f.render_widget(input_widget, root[4]);
+    f.render_widget(input_widget, root[3]);
 }
 
 // ============================================================================
