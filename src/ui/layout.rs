@@ -79,12 +79,22 @@ pub fn ui(f: &mut Frame, app: &App) {
         ])
         .split(root[1]);
 
+    use std::time::Instant;
+
     use crate::ui::{chat::ChatPanel, context::ContextPanel};
     f.render_widget(ChatPanel { app }, cols[0]);
     f.render_widget(ContextPanel { app }, cols[1]);
 
-    // ── THINKING ANIMATION ────────────────────────────────────────────────
-    if app.streaming {
+    // ── RATE LIMIT / THINKING ANIMATION ───────────────────────────────────────
+    if let Some(deadline) = app.cooldown_deadline {
+        let remaining_ms = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
+        let secs = (remaining_ms + 999) / 1000;
+        let rate_label = format!("⚠ rate limited: {}s ({} left)", secs, app.cooldown_retries_left);
+        let rate = Paragraph::new(Line::from(vec![
+            Span::styled(rate_label, theme::WARNING),
+        ]));
+        f.render_widget(rate, root[2]);
+    } else if app.streaming {
         if let Some(elapsed_ms) = app.streaming_elapsed_ms() {
             let frame = get_breathing_frame(elapsed_ms);
             let (char1, status) = frame;
