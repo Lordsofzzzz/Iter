@@ -19,7 +19,7 @@ import { Stats } from './stats.js';
 const openrouter = createOpenRouter({});
 
 /** Default model to use (fallback to Gemma 4B free). */
-export const MODEL_NAME = process.env.MODEL_NAME ?? 'google/gemma-4-31b-it:free';
+export const MODEL_NAME = process.env.MODEL_NAME ?? 'minimax/minimax-m2.5:free';
 
 /** Context window size in tokens. */
 export const MODEL_LIMIT = 200_000;

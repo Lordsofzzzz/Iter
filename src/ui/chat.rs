@@ -70,38 +70,26 @@ impl<'a> Widget for ChatPanel<'a> {
             render_message(msg, self.app, width, &mut lines);
         }
 
-        // Show streaming cursor or breathing animation if agent is responding.
+        // Show breathing animation while agent is streaming.
         if self.app.streaming {
-            let has_assistant_msg = self.app.messages.iter().any(|m| matches!(m.kind, MsgKind::Assistant));
+            if let Some(elapsed_ms) = self.app.streaming_elapsed_ms() {
+                let frame = get_breathing_frame(elapsed_ms);
+                let (char1, status1) = frame;
+                let (_, status2) = get_breathing_frame(elapsed_ms.saturating_sub(150));
+                let (_, status3) = get_breathing_frame(elapsed_ms.saturating_sub(300));
 
-            if has_assistant_msg {
-                // Show cursor at end of existing text
                 lines.push(Line::from(vec![
                     Span::raw(ASSISTANT_INDENT),
-                    Span::styled(STREAMING_CURSOR, theme::ACCENT),
+                    Span::styled(format!("{} {}...", char1, status1), theme::ACCENT),
                 ]));
-            } else {
-                // Show breathing skeleton animation (no content yet)
-                if let Some(elapsed_ms) = self.app.streaming_elapsed_ms() {
-                    // Show 3-line wave effect
-                    let frame = get_breathing_frame(elapsed_ms);
-                    let (char1, status1) = frame;
-                    let (_, status2) = get_breathing_frame(elapsed_ms.saturating_sub(150));
-                    let (_, status3) = get_breathing_frame(elapsed_ms.saturating_sub(300));
-
-                    lines.push(Line::from(vec![
-                        Span::raw(ASSISTANT_INDENT),
-                        Span::styled(format!("{} {}...", char1, status1), theme::ACCENT),
-                    ]));
-                    lines.push(Line::from(vec![
-                        Span::raw(ASSISTANT_INDENT),
-                        Span::styled(format!("  {}...", status2), theme::DIM),
-                    ]));
-                    lines.push(Line::from(vec![
-                        Span::raw(ASSISTANT_INDENT),
-                        Span::styled(format!("  {}...", status3), theme::DIM),
-                    ]));
-                }
+                lines.push(Line::from(vec![
+                    Span::raw(ASSISTANT_INDENT),
+                    Span::styled(format!("  {}...", status2), theme::DIM),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::raw(ASSISTANT_INDENT),
+                    Span::styled(format!("  {}...", status3), theme::DIM),
+                ]));
             }
         }
 
