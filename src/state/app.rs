@@ -111,11 +111,13 @@ impl App {
     }
 
     /// Returns context percentage clamped to 0-100 for UI display.
+    #[allow(dead_code)]
     pub fn context_pct_computed(&self) -> u16 {
         (self.context_pct.min(100.0)) as u16
     }
 
     /// Returns total token usage as a percentage of limit.
+    #[allow(dead_code)]
     pub fn token_pct(&self) -> u16 {
         ((self.tok_total as f64 / self.tok_limit as f64) * 100.0).min(100.0) as u16
     }

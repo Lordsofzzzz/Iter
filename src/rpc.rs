@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 /// Kind of chat message, determines styling in the UI.
 #[derive(Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum MsgKind {
     User,
     Assistant,
@@ -31,23 +32,12 @@ pub struct ChatMessage {
 
 /// Current status of the LLM model (affects UI indicators).
 #[derive(Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum ModelStatus {
     Ready,
     Thinking,
     Error,
     Cooldown,
-}
-
-impl ModelStatus {
-    /// Human-readable label for UI display.
-    pub fn label(&self) -> &'static str {
-        match self {
-            ModelStatus::Ready    => "✔ ready",
-            ModelStatus::Thinking => "⟳ thinking",
-            ModelStatus::Error    => "✗ error",
-            ModelStatus::Cooldown => "⏸ cooldown",
-        }
-    }
 }
 
 // ============================================================================
@@ -78,7 +68,8 @@ pub enum PushEvent {
 #[derive(Debug, Deserialize)]
 pub struct PullResponse {
     pub command: String,
-    pub id:      Option<String>,   // correlation ID echoed back
+    #[allow(dead_code)]
+    pub id:      Option<String>,
     pub success: bool,
     pub error:   Option<String>,
     pub data:    Option<serde_json::Value>,
@@ -94,6 +85,7 @@ pub struct StateData {
     pub model_name:   String,
     pub model_limit:  u32,
     pub temp:         f32,
+    #[allow(dead_code)]
     pub is_streaming: bool,
 }
 
@@ -110,6 +102,7 @@ pub struct TokenBreakdown {
 /// Context window usage information.
 #[derive(Debug, Deserialize)]
 pub struct ContextUsage {
+    #[allow(dead_code)]
     pub tokens:  u32,
     pub limit:   u32,
     pub percent: f32,

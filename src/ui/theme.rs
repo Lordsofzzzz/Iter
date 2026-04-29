@@ -29,7 +29,9 @@ pub const SYSTEM: Style = Style::new().fg(Color::DarkGray);
 // Chat Bubble Styles
 // ============================================================================
 
+#[allow(dead_code)]
 pub const BUBBLE_USER_BG: Style = Style::new().fg(Color::White).bg(Color::DarkGray);
+#[allow(dead_code)]
 pub const BUBBLE_ASSISTANT_BG: Style = Style::new().fg(Color::LightGreen).bg(Color::Black);
 pub const BUBBLE_USER_BORDER: Style = Style::new().fg(Color::Cyan);
 pub const BUBBLE_ASSISTANT_BORDER: Style = Style::new().fg(Color::Green);
@@ -86,17 +88,24 @@ pub const STAT_SUMMARIZED:  Style = Style::new().fg(Color::Magenta).add_modifier
 // Model Info Colors
 // ============================================================================
 
+#[allow(dead_code)]
 pub const MODEL_NAME:   Style = Style::new().fg(Color::White).add_modifier(Modifier::BOLD);
+#[allow(dead_code)]
 pub const MODEL_LIMIT: Style = Style::new().fg(Color::Gray).add_modifier(Modifier::BOLD);
+#[allow(dead_code)]
 pub const MODEL_TEMP:  Style = Style::new().fg(Color::Gray).add_modifier(Modifier::BOLD);
 
 // ============================================================================
 // Model Status Colors
 // ============================================================================
 
+#[allow(dead_code)]
 pub const MODEL_READY:    Style = Style::new().fg(Color::Green).add_modifier(Modifier::BOLD);
+#[allow(dead_code)]
 pub const MODEL_THINKING: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+#[allow(dead_code)]
 pub const MODEL_ERROR:    Style = Style::new().fg(Color::Red).add_modifier(Modifier::BOLD);
+#[allow(dead_code)]
 pub const MODEL_COOLDOWN: Style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
 
 // ============================================================================

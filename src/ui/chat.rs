@@ -36,9 +36,6 @@ const SYSTEM_PREFIX: &str = "  ⚑ ";
 /// Indentation for wrapped system message lines.
 const SYSTEM_INDENT: &str = "      ";
 
-/// Cursor character shown during streaming.
-const STREAMING_CURSOR: &str = "▋";
-
 // ============================================================================
 // Widget Definition
 // ============================================================================
@@ -246,25 +243,4 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     }
 
     out
-}
-
-/// Returns a breathing animation frame based on elapsed time.
-/// Cycles through box-drawing characters with status text.
-fn get_breathing_frame(elapsed_ms: u64) -> (char, &'static str) {
-    const FRAMES: [(char, &str); 12] = [
-        ('▖', "thinking"),
-        ('▗', "thinking"),
-        ('▘', "processing"),
-        ('▙', "processing"),
-        ('▚', "generating"),
-        ('▛', "generating"),
-        ('▜', "computing"),
-        ('▝', "computing"),
-        ('▞', "creating"),
-        ('▟', "creating"),
-        ('▧', "finalizing"),
-        ('▦', "finalizing"),
-    ];
-    let idx = (elapsed_ms / 150) as usize % FRAMES.len();
-    FRAMES[idx]
 }
