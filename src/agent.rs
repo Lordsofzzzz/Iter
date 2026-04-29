@@ -75,6 +75,11 @@ pub fn send_cmd(agent_stdin: &mut Option<std::process::ChildStdin>, payload: ser
     }
 }
 
+/// Sends abort command to stop the current streaming operation.
+pub fn send_abort(agent_stdin: &mut Option<std::process::ChildStdin>) {
+    send_cmd(agent_stdin, serde_json::json!({ "type": "abort" }));
+}
+
 /// Handles incoming agent messages, updating app state accordingly.
 pub fn handle_agent_msg(
     app:         &mut crate::state::App,

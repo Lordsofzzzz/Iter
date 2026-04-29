@@ -134,6 +134,14 @@ use KeyCode::*;
             app.scroll = 0;
         }
 
+        // Stop/cancel current streaming operation.
+        (_, Esc) => {
+            if app.streaming {
+                app.end_streaming();
+                agent::send_abort(agent_stdin);
+            }
+        }
+
         // Send user message to agent.
         (_, Enter) => {
             let text = app.input.trim().to_string();
