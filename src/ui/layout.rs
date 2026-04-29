@@ -23,8 +23,11 @@ const HEADER_HEIGHT: u16 = 1;
 /// Height of the animation area.
 const ANIMATION_HEIGHT: u16 = 1;
 
-/// Height of the input area.
-const INPUT_HEIGHT: u16 = 3;
+/// Height of the input area (base height, expands with content).
+const INPUT_HEIGHT_BASE: u16 = 3;
+
+/// Maximum height for the input area.
+const INPUT_HEIGHT_MAX: u16 = 8;
 
 /// Chat panel width as percentage of main content area.
 const CHAT_PANEL_WIDTH_PCT: u16 = 75;
@@ -40,6 +43,11 @@ const CONTEXT_PANEL_WIDTH_PCT: u16 = 25;
 pub fn ui(f: &mut Frame, app: &App) {
     let size = f.area();
 
+    // ── INPUT ──────────────────────────────────────────────────────────────
+    // Calculate dynamic input height based on newline count
+    let input_lines = app.input.lines().count() as u16;
+    let input_height = (input_lines + 1).clamp(INPUT_HEIGHT_BASE, INPUT_HEIGHT_MAX);
+
     // Vertical layout: header, main content, animation, input.
     let root = Layout::default()
         .direction(Direction::Vertical)
@@ -47,7 +55,7 @@ pub fn ui(f: &mut Frame, app: &App) {
             Constraint::Length(HEADER_HEIGHT),
             Constraint::Min(0),
             Constraint::Length(ANIMATION_HEIGHT),
-            Constraint::Length(INPUT_HEIGHT),
+            Constraint::Length(input_height),
         ])
         .split(size);
 
@@ -108,9 +116,12 @@ pub fn ui(f: &mut Frame, app: &App) {
     }
 
     // ── INPUT ──────────────────────────────────────────────────────────────
-    let input_widget = Paragraph::new(format!(" ❯ {}_", app.input))
+    // Render multiline input with proper wrapping
+    let input_text = app.input.replace('\n', "\n ❯ ");
+    let input_widget = Paragraph::new(format!(" ❯ {}", input_text))
         .style(ratatui::style::Style::new().fg(ratatui::style::Color::White))
-        .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT));
+        .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT))
+        .wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(input_widget, root[3]);
 }
 

@@ -57,6 +57,8 @@ pub enum PushEvent {
     Error { message: String },
     Cooldown { wait_ms: u64, retries_left: u32 },
     RetryResult { success: bool, attempt: u32 },
+    ToolCall { name: String, input: String },   // ← new
+    ToolResult { name: String, output: String }, // ← new
 }
 
 // ============================================================================

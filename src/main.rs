@@ -142,6 +142,11 @@ use KeyCode::*;
             }
         }
 
+        // Insert newline in input (Alt+Enter).
+        (KeyModifiers::ALT, Enter) => {
+            app.input.push('\n');
+        }
+
         // Send user message to agent.
         (_, Enter) => {
             let text = app.input.trim().to_string();

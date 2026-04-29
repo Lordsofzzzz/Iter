@@ -13,5 +13,5 @@ export { Stats, type SessionStats } from './stats.js';
  * @param client - The LLM client to clear
  */
 export function clearHistory(client: LLMClient): void {
-  client.getSessionStats();
+  client.clearHistory();
 }

@@ -22,7 +22,9 @@ export type PushEvent =
   | { type: 'agent_end' }
   | { type: 'error'; message: string }
   | { type: 'cooldown'; wait_ms: number; retries_left: number }
-  | { type: 'retry_result'; success: boolean; attempt: number };
+  | { type: 'retry_result'; success: boolean; attempt: number }
+  | { type: 'tool_call';   name: string; input: string }   // ← new
+  | { type: 'tool_result'; name: string; output: string }; // ← new
 
 // ============================================================================
 // Pull Responses: TUI → Agent → TUI

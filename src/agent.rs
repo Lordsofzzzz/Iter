@@ -165,6 +165,15 @@ fn handle_push_event(
             app.push_system(format!("error: {message}"));
             app.set_error();
         }
+
+        PushEvent::ToolCall { name, input } => {
+            app.push_system(format!("▶ {name}({input})"));
+            app.tool_calls += 1;
+        }
+
+        PushEvent::ToolResult { name, output } => {
+            app.push_system(format!("◀ {name}: {output}"));
+        }
     }
 }
 

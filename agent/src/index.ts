@@ -9,11 +9,24 @@ import { LLMClient, MODEL_NAME, MODEL_LIMIT, clearHistory } from './llm/index.js
 import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
 
 // ============================================================================
+// Configuration
+// ============================================================================
+
+/** List of available free models on OpenRouter. */
+const FREE_MODELS = [
+  'minimax/minimax-m2y5:free',
+  'google/gemma-3-27b-it:free',
+  'meta-llama/llama-4-maverick:free',
+  'deepseek/deepseek-r1-0528:free',
+] as const;
+
+// ============================================================================
 // Global State
 // ============================================================================
 
 const llm = new LLMClient();
 let isStreaming = false;
+let currentModel = MODEL_NAME;
 
 // ============================================================================
 // Initialization
@@ -91,6 +104,8 @@ readStdinLines(async (line: string) => {
         id,
         success: true,
       });
+      // Push a system event so TUI knows history is gone
+      emitEvent({ type: 'agent_start' });
       break;
 
     case 'prompt':
@@ -106,6 +121,14 @@ readStdinLines(async (line: string) => {
         });
         break;
       }
+
+      // ── Slash command dispatch ──────────────────────────────────────
+      const text = payload.content.trim();
+      if (text.startsWith('/')) {
+        handleSlashCommand(text, id);
+        break;
+      }
+      // ── End slash command dispatch ─────────────────────────────────
 
       // Reject if already streaming.
       if (isStreaming) {
@@ -128,7 +151,7 @@ readStdinLines(async (line: string) => {
       });
 
       isStreaming = true;
-      await llm.streamResponse(payload.content);
+      await llm.streamResponse(payload.content, currentModel);
       isStreaming = false;
       break;
     }
@@ -143,6 +166,60 @@ readStdinLines(async (line: string) => {
       });
   }
 });
+
+// ============================================================================
+// Slash Command Handler
+// ============================================================================
+
+/**
+ * Handles slash commands (/clear, /model).
+ */
+function handleSlashCommand(text: string, id?: string): void {
+  const [cmd, ...args] = text.split(' ');
+
+  switch (cmd) {
+    case '/clear':
+      clearHistory(llm);
+      emitResponse({
+        kind: 'response',
+        command: 'clear',
+        id,
+        success: true,
+      });
+      emitEvent({ type: 'tool_result', name: 'clear', output: 'History cleared.' });
+      // Push a system event so TUI knows history is gone
+      emitEvent({ type: 'agent_start' });
+      break;
+
+    case '/model': {
+      const idx = parseInt(args[0] ?? '', 10);
+      if (isNaN(idx) || idx < 0 || idx >= FREE_MODELS.length) {
+        // List available models
+        const list = FREE_MODELS.map((m, i) => `${i}: ${m}`).join('\n');
+        emitEvent({
+          type: 'tool_result',
+          name: 'model',
+          output: `Available models:\n${list}\n\nUsage: /model <0-${FREE_MODELS.length - 1}>`,
+        });
+      } else {
+        currentModel = FREE_MODELS[idx];
+        emitEvent({
+          type: 'tool_result',
+          name: 'model',
+          output: `Switched to: ${currentModel}`,
+        });
+      }
+      break;
+    }
+
+    default:
+      emitEvent({
+        type: 'tool_result',
+        name: 'unknown',
+        output: `Unknown command: ${cmd}\nAvailable: /clear, /model [0-${FREE_MODELS.length - 1}]`,
+      });
+  }
+}
 
 // ============================================================================
 // Type Guards

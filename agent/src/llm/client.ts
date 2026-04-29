@@ -11,6 +11,8 @@ import { emitEvent, SessionStatsData } from '../rpc.js';
 import { retry } from '../utils/retry.js';
 import { History } from './history.js';
 import { Stats } from './stats.js';
+import { tools } from '../tools/index.js';
+import { buildSystemPrompt } from '../system-prompt.js';
 
 // ============================================================================
 // Configuration Constants
@@ -81,12 +83,24 @@ export class LLMClient {
   }
 
   /**
+   * Clears conversation history.
+   */
+  clearHistory(): void {
+    this.history.clear();
+    this.stats.reset();
+  }
+
+  /**
    * Sends a user message and streams the assistant response.
    *
    * Updates history, emits text deltas, tracks tokens/cost,
    * and handles errors gracefully.
+   *
+   * @param userMessage - The user's input message
+   * @param modelOverride - Optional model name to use instead of default
    */
-  async streamResponse(userMessage: string): Promise<void> {
+  async streamResponse(userMessage: string, modelOverride?: string): Promise<void> {
+    const model = modelOverride ?? MODEL_NAME;
     this.history.pushUser(userMessage);
     emitEvent({ type: 'turn_start' });
 
@@ -97,11 +111,30 @@ export class LLMClient {
       await retry(async () => {
         assistantText = '';  // Reset on each attempt to avoid duplication on retry.
         const result = await streamText({
-          model:       openrouter.chat(MODEL_NAME),
+          model:       openrouter.chat(model),
           temperature: MODEL_TEMP,
+          system:      buildSystemPrompt(),
           messages:    this.history.get(),
+          tools,
+          maxSteps:    20,
           abortSignal: this.abortController!.signal,
-          onError:    () => {},
+          onError:     () => {},
+          onStepFinish: ({ toolCalls, toolResults }) => {
+            for (const tc of toolCalls ?? []) {
+              emitEvent({
+                type:  'tool_call',
+                name:  tc.toolName,
+                input: JSON.stringify(tc.args),
+              });
+            }
+            for (const tr of toolResults ?? []) {
+              emitEvent({
+                type:   'tool_result',
+                name:   tr.toolName,
+                output: String(tr.result).slice(0, 500), // truncate for TUI
+              });
+            }
+          },
         });
 
         // Stream text deltas to TUI.
@@ -155,14 +188,6 @@ export class LLMClient {
     emitEvent({ type: 'turn_end' });
     emitEvent({ type: 'agent_end' });
   }
-}
-
-/**
- * Clears conversation history (for /clear command).
- */
-export function clearHistory(client: LLMClient): void {
-  // History is managed by client internally.
-  client.getSessionStats();
 }
 
 // ============================================================================
