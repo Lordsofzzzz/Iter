@@ -1,3 +1,10 @@
+/**
+ * LLM client using OpenRouter provider.
+ *
+ * Handles message history, token tracking, and streaming responses
+ * from the language model.
+ */
+
 import { streamText } from 'ai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { emitEvent, SessionStatsData } from '../rpc.js';
@@ -5,26 +12,48 @@ import { retry } from '../utils/retry.js';
 import { History } from './history.js';
 import { Stats } from './stats.js';
 
+// ============================================================================
+// Configuration Constants
+// ============================================================================
+
 const openrouter = createOpenRouter({});
 
-export const MODEL_NAME  = process.env.MODEL_NAME ?? 'google/gemma-4-31b-it:free';
+/** Default model to use (fallback to Gemma 4B free). */
+export const MODEL_NAME = process.env.MODEL_NAME ?? 'google/gemma-4-31b-it:free';
+
+/** Context window size in tokens. */
 export const MODEL_LIMIT = 200_000;
-export const MODEL_TEMP  = 0.3;
 
-const COST_PER_1M: [number, number] = [0.0, 0.0];
+/** Temperature for generation (0.0 = deterministic, 1.0 = creative). */
+export const MODEL_TEMP = 0.3;
 
+/** Cost per 1M tokens [input, output]. Currently free. */
+const COST_PER_MILLION: [number, number] = [0.0, 0.0];
+
+// ============================================================================
+// Client Implementation
+// ============================================================================
+
+/** LLM client managing conversation history and session stats. */
 export class LLMClient {
   private history = new History();
   private stats = new Stats();
   private abortController: AbortController | null = null;
 
+  /**
+   * Returns current session statistics.
+   */
   getSessionStats(): ReturnType<Stats['get']> {
     return this.stats.get();
   }
 
+  /**
+   * Returns session stats formatted for TUI response.
+   */
   getSessionStatsResponse(modelLimit: number): SessionStatsData {
     const s = this.stats.get();
     const used = s.tokens.input + s.tokens.output;
+
     return {
       tokens: {
         input:       s.tokens.input,
@@ -43,11 +72,20 @@ export class LLMClient {
     };
   }
 
+  /**
+   * Aborts any in-progress streaming request.
+   */
   abort(): void {
     this.abortController?.abort();
     this.abortController = null;
   }
 
+  /**
+   * Sends a user message and streams the assistant response.
+   *
+   * Updates history, emits text deltas, tracks tokens/cost,
+   * and handles errors gracefully.
+   */
   async streamResponse(userMessage: string): Promise<void> {
     this.history.pushUser(userMessage);
     emitEvent({ type: 'turn_start' });
@@ -65,53 +103,54 @@ export class LLMClient {
           onError:    () => {},
         });
 
+        // Stream text deltas to TUI.
         for await (const chunk of result.textStream) {
           assistantText += chunk;
           emitEvent({ type: 'text_delta', delta: chunk });
         }
 
-        const usage = await result.usage;
-        const usageAny = usage as any;
+        // Extract usage info (handles multiple provider formats).
+        const usage = await result.usage as {
+          promptTokens?: number;
+          completionTokens?: number;
+          providerMetadata?: {
+            anthropic?: { cacheReadInputTokens?: number; cacheCreationInputTokens?: number };
+            openai?: { cachedTokens?: number };
+          };
+        };
 
-        const input  = usageAny.promptTokens     ?? usageAny.inputTokens  ?? 0;
-        const output = usageAny.completionTokens ?? usageAny.outputTokens ?? 0;
+        const input  = usage.promptTokens ?? 0;
+        const output = usage.completionTokens ?? 0;
 
-        const meta          = usageAny.providerMetadata ?? {};
+        const meta = usage.providerMetadata ?? {};
         const anthropicMeta = meta?.anthropic ?? {};
-        const openaiMeta    = meta?.openai ?? {};
+        const openaiMeta = meta?.openai ?? {};
 
-        const cache_read  = (anthropicMeta.cacheReadInputTokens ?? openaiMeta.cachedTokens ?? 0) as number;
-        const cache_write = (anthropicMeta.cacheCreationInputTokens ?? 0) as number;
+        const cacheRead  = (anthropicMeta.cacheReadInputTokens ?? openaiMeta.cachedTokens ?? 0) as number;
+        const cacheWrite = (anthropicMeta.cacheCreationInputTokens ?? 0) as number;
 
-        this.stats.addTokens(input, output, cache_read, cache_write);
+        // Update session stats.
+        this.stats.addTokens(input, output, cacheRead, cacheWrite);
 
-        const turnCost = ((input / 1_000_000) * COST_PER_1M[0])
-                      + ((output / 1_000_000) * COST_PER_1M[1]);
+        const turnCost = ((input / 1_000_000) * COST_PER_MILLION[0])
+                      + ((output / 1_000_000) * COST_PER_MILLION[1]);
         this.stats.addCost(turnCost);
         this.stats.incrementTurns();
 
+        // Save assistant response to history.
         if (assistantText) {
           this.history.pushAssistant(assistantText);
         }
       }, this.abortController!.signal);
 
     } catch (error: unknown) {
+      // Remove user message on failure (allows retry).
       this.history.pop();
+
+      // Handle abort separately (not an error).
       const isAbort = error instanceof Error && error.name === 'AbortError';
       if (!isAbort) {
-        const raw = error instanceof Error ? error.message : String(error);
-        let message = raw;
-        try {
-          const jsonMatch = raw.match(/\{.*\}/s);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            const inner = parsed?.error?.message ?? parsed?.message;
-            if (inner && typeof inner === 'string') {
-              message = inner.split('.')[0].trim();
-            }
-          }
-        } catch { /* keep raw */ }
-        message = message.replace(/\r?\n/g, ' ').slice(0, 200);
+        const message = extractErrorMessage(error);
         emitEvent({ type: 'error', message: `LLM error: ${message}` });
       }
     } finally {
@@ -123,6 +162,38 @@ export class LLMClient {
   }
 }
 
+/**
+ * Clears conversation history (for /clear command).
+ */
 export function clearHistory(client: LLMClient): void {
+  // History is managed by client internally.
   client.getSessionStats();
+}
+
+// ============================================================================
+// Private Helpers
+// ============================================================================
+
+/**
+ * Extracts a clean error message from various error formats.
+ */
+function extractErrorMessage(error: unknown): string {
+  let message = error instanceof Error ? error.message : String(error);
+
+  // Try to extract inner error from JSON response.
+  try {
+    const jsonMatch = message.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const inner = parsed?.error?.message ?? parsed?.message;
+      if (inner && typeof inner === 'string') {
+        message = inner.split('.')[0].trim();
+      }
+    }
+  } catch {
+    // Keep original message.
+  }
+
+  // Normalize whitespace and truncate.
+  return message.replace(/\r?\n/g, ' ').slice(0, 200);
 }

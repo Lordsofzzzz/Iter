@@ -1,3 +1,8 @@
+//! Context panel widget - displays token usage and session stats.
+//!
+//! Shows context window gauge, token breakdown, session statistics,
+//! and model configuration info in a side panel.
+
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
@@ -9,6 +14,27 @@ use ratatui::{
 use crate::state::{App, ModelStatus};
 use crate::ui::theme;
 
+// ============================================================================
+// Layout Constants
+// ============================================================================
+
+/// Height of the context gauge section (in lines).
+const CONTEXT_GAUGE_HEIGHT: u16 = 3;
+
+/// Height of the token breakdown section.
+const TOKEN_BREAKDOWN_HEIGHT: u16 = 8;
+
+/// Height of the session stats section.
+const SESSION_STATS_HEIGHT: u16 = 7;
+
+/// Minimum height for model info section.
+const MODEL_INFO_MIN_HEIGHT: u16 = 6;
+
+// ============================================================================
+// Widget Definition
+// ============================================================================
+
+/// Context panel widget displaying token usage and model info.
 pub struct ContextPanel<'a> {
     pub app: &'a App,
 }
@@ -22,13 +48,14 @@ impl<'a> Widget for ContextPanel<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
+        // Split into vertical sections.
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // D2: context window gauge
-                Constraint::Length(8),  // D4: token breakdown
-                Constraint::Length(7),  // session stats
-                Constraint::Min(6),     // model info
+                Constraint::Length(CONTEXT_GAUGE_HEIGHT),
+                Constraint::Length(TOKEN_BREAKDOWN_HEIGHT),
+                Constraint::Length(SESSION_STATS_HEIGHT),
+                Constraint::Min(MODEL_INFO_MIN_HEIGHT),
             ])
             .split(inner);
 
@@ -40,8 +67,7 @@ impl<'a> Widget for ContextPanel<'a> {
 }
 
 impl<'a> ContextPanel<'a> {
-    /// ── 1. CONTEXT WINDOW GAUGE ─────────────────────────────────────────────
-    /// Shows how much of the model context window is used
+    /// Renders the context window usage gauge.
     fn render_context_gauge(&self, area: Rect, buf: &mut Buffer) {
         let ctx_pct = self.app.context_pct.min(100.0) as u16;
         let ctx_col = theme::context_gauge_color(self.app.context_pct);
@@ -63,7 +89,7 @@ impl<'a> ContextPanel<'a> {
         gauge.render(area, buf);
     }
 
-    /// ── 2. TOKEN BREAKDOWN ───────────────────────────────────────────────────
+    /// Renders token breakdown (input, output, cache).
     fn render_token_breakdown(&self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
             .title(" Tokens ")
@@ -73,19 +99,19 @@ impl<'a> ContextPanel<'a> {
         block.render(area, buf);
 
         let tok_lines = vec![
-            tok_row("input  ", self.app.tok_input, theme::TOK_INPUT),
-            tok_row("output ", self.app.tok_output, theme::TOK_OUTPUT),
-            tok_row("$cache↑", self.app.tok_cache_write, theme::TOK_CACHE_WRITE),
-            tok_row("$cache↓", self.app.tok_cache_read, theme::TOK_CACHE_READ),
+            token_row("input  ", self.app.tok_input, theme::TOK_INPUT),
+            token_row("output ", self.app.tok_output, theme::TOK_OUTPUT),
+            token_row("$cache↑", self.app.tok_cache_write, theme::TOK_CACHE_WRITE),
+            token_row("$cache↓", self.app.tok_cache_read, theme::TOK_CACHE_READ),
             Line::from(vec![
                 Span::styled(" ─────────────────", theme::DIM),
             ]),
-            tok_row("total  ", self.app.tok_total, theme::TOK_TOTAL),
+            token_row("total  ", self.app.tok_total, theme::TOK_TOTAL),
         ];
         Paragraph::new(tok_lines).render(inner, buf);
     }
 
-    /// ── 3. SESSION STATS ──────────────────────────────────────────────────────
+    /// Renders session statistics (turns, tools, cost).
     fn render_session_stats(&self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
             .title(" Session ")
@@ -94,7 +120,7 @@ impl<'a> ContextPanel<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // D3: cost — show more decimals for free/cheap models
+        // Show more decimal places for free/cheap models.
         let cost_str = if self.app.cost < 0.001 {
             format!("${:.6}", self.app.cost)
         } else {
@@ -110,7 +136,7 @@ impl<'a> ContextPanel<'a> {
         Paragraph::new(sess_lines).render(inner, buf);
     }
 
-    /// ── 4. MODEL INFO ─────────────────────────────────────────────────────────
+    /// Renders model configuration info.
     fn render_model_info(&self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
             .title(" Model ")
@@ -136,7 +162,12 @@ impl<'a> ContextPanel<'a> {
     }
 }
 
-fn tok_row(label: &str, tok: u32, val_style: Style) -> Line<'static> {
+// ============================================================================
+// Private Helpers
+// ============================================================================
+
+/// Creates a token row with label and value.
+fn token_row(label: &str, tok: u32, val_style: Style) -> Line<'static> {
     Line::from(vec![
         Span::styled(" ", Style::new()),
         Span::styled(format!("{label} "), theme::LABEL),
@@ -144,6 +175,7 @@ fn tok_row(label: &str, tok: u32, val_style: Style) -> Line<'static> {
     ])
 }
 
+/// Creates a stats row with label and value.
 fn stat_row<'a>(label: &'a str, value: String, val_style: Style) -> Line<'a> {
     Line::from(vec![
         Span::styled(" ", Style::new()),

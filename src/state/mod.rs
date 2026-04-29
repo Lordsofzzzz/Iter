@@ -1,5 +1,4 @@
 pub mod app;
-pub mod types;
 
 pub use app::App;
-pub use types::{ChatMessage, MsgKind, ModelStatus};
+pub use crate::rpc::{ChatMessage, MsgKind, ModelStatus};

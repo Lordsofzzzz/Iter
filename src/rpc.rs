@@ -1,8 +1,61 @@
+//! RPC wire protocol types for TUI ↔ Agent communication.
+//!
+//! The protocol uses JSONL (one JSON object per line) over stdout/stdin.
+//! Two message directions exist:
+//!   - **Push**: Agent → TUI (unprompted events like text deltas)
+//!   - **Pull**: TUI → Agent → TUI (request/response pattern)
+
 use serde::Deserialize;
 
-// ── Push events ──────────────────────────────────────────────────────────
-// Identified by absence of "kind" field.
-// Deserialized via tag = "type".
+// ============================================================================
+// Chat Message Types (used by UI for rendering)
+// ============================================================================
+
+/// Kind of chat message, determines styling in the UI.
+#[derive(Clone, PartialEq)]
+pub enum MsgKind {
+    User,
+    Assistant,
+    ToolCall,
+    ToolResult,
+    System,
+    RateLimit,
+}
+
+/// A single message in the chat history.
+#[derive(Clone)]
+pub struct ChatMessage {
+    pub kind: MsgKind,
+    pub content: String,
+}
+
+/// Current status of the LLM model (affects UI indicators).
+#[derive(Clone, PartialEq)]
+pub enum ModelStatus {
+    Ready,
+    Thinking,
+    Error,
+    Cooldown,
+}
+
+impl ModelStatus {
+    /// Human-readable label for UI display.
+    pub fn label(&self) -> &'static str {
+        match self {
+            ModelStatus::Ready    => "✔ ready",
+            ModelStatus::Thinking => "⟳ thinking",
+            ModelStatus::Error    => "✗ error",
+            ModelStatus::Cooldown => "⏸ cooldown",
+        }
+    }
+}
+
+// ============================================================================
+// Push Events: Agent → TUI (unprompted)
+// ============================================================================
+
+/// Unprompted events from the agent to the TUI.
+/// Identified by absence of the `kind` field.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PushEvent {
@@ -16,20 +69,26 @@ pub enum PushEvent {
     RetryResult { success: bool, attempt: u32 },
 }
 
-// ── Pull responses ───────────────────────────────────────────────────────
-// Identified by kind = "response".
-// Always has command + success. id is echoed back if sent.
+// ============================================================================
+// Pull Responses: TUI → Agent → TUI
+// ============================================================================
+
+/// Response from the agent to a TUI command.
+/// Always has `kind: "response"` which distinguishes it from push events.
 #[derive(Debug, Deserialize)]
 pub struct PullResponse {
     pub command: String,
-    pub id:      Option<String>,   // F3: echoed correlation id
+    pub id:      Option<String>,   // correlation ID echoed back
     pub success: bool,
-    pub error:   Option<String>,   // present when success = false
-    pub data:    Option<serde_json::Value>, // parsed per-command in handler
+    pub error:   Option<String>,
+    pub data:    Option<serde_json::Value>,
 }
 
-// ── Parsed data shapes for pull responses ───────────────────────────────
+// ============================================================================
+// Parsed Data Shapes (for pull response `data` field)
+// ============================================================================
 
+/// Data for the `get_state` command response.
 #[derive(Debug, Deserialize)]
 pub struct StateData {
     pub model_name:   String,
@@ -38,6 +97,7 @@ pub struct StateData {
     pub is_streaming: bool,
 }
 
+/// Token usage breakdown.
 #[derive(Debug, Deserialize)]
 pub struct TokenBreakdown {
     pub input:       u32,
@@ -47,6 +107,7 @@ pub struct TokenBreakdown {
     pub total:       u32,
 }
 
+/// Context window usage information.
 #[derive(Debug, Deserialize)]
 pub struct ContextUsage {
     pub tokens:  u32,
@@ -54,6 +115,7 @@ pub struct ContextUsage {
     pub percent: f32,
 }
 
+/// Full session statistics for the UI.
 #[derive(Debug, Deserialize)]
 pub struct SessionStatsData {
     pub tokens:        TokenBreakdown,
@@ -62,61 +124,61 @@ pub struct SessionStatsData {
     pub turns:         u32,
 }
 
-// ── Raw wire envelope ────────────────────────────────────────────────────
-// First step: determine if line is a push event or pull response.
-// Check for "kind":"response" field.
+// ============================================================================
+// Internal Channel Types
+// ============================================================================
+
+/// Wire format envelope — first step in parsing to determine message direction.
 #[derive(Debug, Deserialize)]
 struct RawEnvelope {
     pub kind: Option<String>,
 }
 
-// ── Top-level discriminated type ─────────────────────────────────────────
+/// Top-level parsed message from the agent.
 #[derive(Debug)]
 pub enum AgentMessage {
     Push(PushEvent),
     Pull(PullResponse),
-    // F4: unknown event — logged, never silently dropped
+    /// Parse failure — logged but never silently dropped.
     Unknown { raw: String },
 }
 
-/// Parse a raw JSONL line into an AgentMessage.
-/// F4: never returns Err silently — all parse failures become Unknown { raw }.
+/// Parse a raw JSONL line into an `AgentMessage`.
+///
+/// Never returns `Err` silently — all parse failures become `Unknown`.
 pub fn parse_line(line: &str) -> AgentMessage {
-    // peek at envelope to route
+    // Peek at envelope to determine message direction.
     let envelope: RawEnvelope = match serde_json::from_str(line) {
         Ok(e)  => e,
         Err(_) => return AgentMessage::Unknown { raw: line.to_string() },
     };
 
     match envelope.kind.as_deref() {
-        // F2: "kind":"response" → pull response
+        // "kind":"response" indicates a pull response.
         Some("response") => {
             match serde_json::from_str::<PullResponse>(line) {
                 Ok(r)  => AgentMessage::Pull(r),
-                // F4: parse failure logged as Unknown, never swallowed
                 Err(e) => AgentMessage::Unknown {
                     raw: format!("pull-parse-err: {e} | {line}"),
                 },
             }
         }
-        // no kind → push event
+        // No `kind` field means push event.
         None => {
             match serde_json::from_str::<PushEvent>(line) {
                 Ok(ev) => AgentMessage::Push(ev),
-                // F4: unknown event type — stored as Unknown for logging
                 Err(e) => AgentMessage::Unknown {
                     raw: format!("push-parse-err: {e} | {line}"),
                 },
             }
         }
-        // unexpected kind value
         Some(other) => AgentMessage::Unknown {
             raw: format!("unknown-kind: {other} | {line}"),
         },
     }
 }
 
-// ── Internal channel event ────────────────────────────────────────────────
+/// Internal TUI channel events.
 #[derive(Debug)]
 pub enum UiEvent {
     Agent(AgentMessage),

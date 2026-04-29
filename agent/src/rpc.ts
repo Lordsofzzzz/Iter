@@ -1,7 +1,19 @@
+/**
+ * RPC wire protocol for TUI ↔ Agent communication.
+ *
+ * Uses JSONL (one JSON object per line) over stdout/stdin.
+ * Two message directions:
+ *   - Push: Agent → TUI (unprompted events like text deltas)
+ *   - Pull: TUI → Agent → TUI (request/response pattern)
+ */
+
 import { logToFile } from './utils/logger';
 
-// ── Push events (agent → TUI, unprompted) ──────────────────────────────
-// No "kind" field. TUI identifies by absence of kind:"response".
+// ============================================================================
+// Push Events: Agent → TUI (unprompted)
+// ============================================================================
+
+/** Unprompted events from the agent. Identified by absence of `kind` field. */
 export type PushEvent =
   | { type: 'agent_start' }
   | { type: 'turn_start' }
@@ -12,9 +24,11 @@ export type PushEvent =
   | { type: 'cooldown'; wait_ms: number; retries_left: number }
   | { type: 'retry_result'; success: boolean; attempt: number };
 
-// ── Pull responses (agent → TUI, reply to a command) ──────────────────
-// Always has kind:"response" + command + success.
-// TUI distinguishes from push events by checking kind === "response".
+// ============================================================================
+// Pull Responses: TUI → Agent → TUI
+// ============================================================================
+
+/** Response to a TUI command. Always has `kind: "response"`. */
 export type PullResponse =
   | { kind: 'response'; command: 'get_state';         id?: string; success: true;  data: StateData }
   | { kind: 'response'; command: 'get_session_stats'; id?: string; success: true;  data: SessionStatsData }
@@ -23,6 +37,11 @@ export type PullResponse =
   | { kind: 'response'; command: 'clear';             id?: string; success: true }
   | { kind: 'response'; command: string;              id?: string; success: false; error: string };
 
+// ============================================================================
+// Data Shapes
+// ============================================================================
+
+/** Model configuration data. */
 export interface StateData {
   model_name:  string;
   model_limit: number;
@@ -30,56 +49,75 @@ export interface StateData {
   is_streaming: boolean;
 }
 
-export interface SessionStatsData {
-  tokens: {
-    input:       number;
-    output:      number;
-    cache_read:  number;
-    cache_write: number;
-    total:       number;
-  };
-  context_usage: {
-    tokens:  number;
-    limit:   number;
-    percent: number;
-  };
-  cost:  number;
-  turns: number;
+/** Token usage breakdown. */
+export interface TokenUsage {
+  input:       number;
+  output:      number;
+  cache_read:  number;
+  cache_write: number;
+  total:       number;
 }
 
+/** Context window usage. */
+export interface ContextInfo {
+  tokens:  number;
+  limit:   number;
+  percent: number;
+}
+
+/** Session statistics for the UI. */
+export interface SessionStatsData {
+  tokens:        TokenUsage;
+  context_usage: ContextInfo;
+  cost:          number;
+  turns:         number;
+}
+
+/** Union type for any RPC message. */
 export type RpcMessage = PushEvent | PullResponse;
 
-// ── emitters ────────────────────────────────────────────────────────────
+// ============================================================================
+// Emitters (stdout)
+// ============================================================================
 
-// F1: write to stdout directly — never use console.log (adds \r\n on Windows)
-// Strict LF-only framing. One JSON object per line, terminated by \n.
-// ... existing code
-
+/**
+ * Writes a JSON object to stdout as a single line (JSONL format).
+ * Uses LF-only framing to avoid corruption on Windows.
+ */
 function writeLine(obj: unknown): void {
   const json = JSON.stringify(obj) + '\n';
   process.stdout.write(json);
   logToFile(json.trim());
 }
 
+/** Emits a push event to the TUI. */
 export function emitEvent(event: PushEvent): void {
   writeLine(event);
 }
 
+/** Emits a pull response to the TUI. */
 export function emitResponse(response: PullResponse): void {
   writeLine(response);
 }
 
-// Backward compatibility for current call sites.
+/** Backward compatibility wrapper. */
 export function emitRPC(event: RpcMessage): void {
   writeLine(event);
 }
 
-// ── F1: strict LF-only stdin reader ────────────────────────────────────
-// readline MUST NOT be used — it splits on U+2028 / U+2029 which are
-// valid inside JSON strings and would corrupt multi-line deltas.
+// ============================================================================
+// Input Reader (stdin)
+// ============================================================================
 
 type LineHandler = (line: string) => void | Promise<void>;
 
+/**
+ * Reads stdin line-by-line using raw chunk parsing.
+ *
+ * NOTE: Does NOT use readline module — it splits on U+2028/U+2029 which
+ * are valid inside JSON strings and would corrupt multi-line deltas.
+ * Splits ONLY on \n (LF).
+ */
 export function readStdinLines(handler: LineHandler): void {
   let buffer = '';
 
@@ -88,11 +126,14 @@ export function readStdinLines(handler: LineHandler): void {
   process.stdin.on('data', (chunk: string) => {
     buffer += chunk;
     let newline: number;
-    // F1: split ONLY on \n
+
+    // Split ONLY on \n, strip trailing \r for Windows compatibility.
     while ((newline = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, newline).replace(/\r$/, ''); // strip optional \r
+      const line = buffer.slice(0, newline).replace(/\r$/, '');
       buffer = buffer.slice(newline + 1);
-      if (line.trim()) handler(line);
+      if (line.trim()) {
+        handler(line);
+      }
     }
   });
 
