@@ -112,10 +112,10 @@ export class LLMClient {
 
         // Extract usage info (handles multiple provider formats).
         const usage = await result.usage;
-        console.error('[DEBUG usage]', JSON.stringify(usage, null, 2));
 
-        const input  = usage?.promptTokens ?? (usage as any)?.tokensPrompt ?? (usage as any)?.inputTokenCount ?? (usage as any)?.usage?.prompt_tokens ?? 0;
-        const output = usage?.completionTokens ?? (usage as any)?.tokensCompletion ?? (usage as any)?.outputTokenCount ?? (usage as any)?.usage?.completion_tokens ?? 0;
+        // AI SDK v4 uses inputTokens/outputTokens; fall back to v3 names for compatibility.
+        const input  = (usage as any)?.inputTokens ?? usage?.promptTokens ?? 0;
+        const output = (usage as any)?.outputTokens ?? usage?.completionTokens ?? 0;
 
         const meta = usage?.providerMetadata ?? {};  // Fixed: safe access when usage is undefined
         const anthropicMeta = meta?.anthropic ?? {};
