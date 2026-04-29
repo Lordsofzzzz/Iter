@@ -70,12 +70,26 @@ impl<'a> Widget for ChatPanel<'a> {
             render_message(msg, self.app, width, &mut lines);
         }
 
-        // Show streaming cursor if agent is responding.
+        // Show streaming cursor or breathing animation if agent is responding.
         if self.app.streaming {
-            lines.push(Line::from(vec![
-                Span::raw(ASSISTANT_INDENT),
-                Span::styled(STREAMING_CURSOR, theme::ACCENT),
-            ]));
+            let has_assistant_msg = self.app.messages.iter().any(|m| matches!(m.kind, MsgKind::Assistant));
+
+            if has_assistant_msg {
+                // Show cursor at end of existing text
+                lines.push(Line::from(vec![
+                    Span::raw(ASSISTANT_INDENT),
+                    Span::styled(STREAMING_CURSOR, theme::ACCENT),
+                ]));
+            } else {
+                // Show breathing skeleton animation (no content yet)
+                if let Some(elapsed_ms) = self.app.streaming_elapsed_ms() {
+                    let frame = get_breathing_frame(elapsed_ms);
+                    lines.push(Line::from(vec![
+                        Span::raw(ASSISTANT_INDENT),
+                        Span::styled(format!("{} thinking...", frame), theme::DIM),
+                    ]));
+                }
+            }
         }
 
         // Apply scrolling offset.
@@ -257,4 +271,12 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     }
 
     out
+}
+
+/// Returns a breathing animation frame based on elapsed time.
+/// Cycles through box-drawing characters for a loading effect.
+fn get_breathing_frame(elapsed_ms: u64) -> char {
+    const FRAMES: [char; 10] = ['▖', '▗', '▘', '▙', '▚', '▛', '▜', '▝', '▞', '▟'];
+    let idx = (elapsed_ms / 100) as usize % FRAMES.len();
+    FRAMES[idx]
 }

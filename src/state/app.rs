@@ -67,6 +67,9 @@ pub struct App {
     pub cooldown_deadline:    Option<Instant>,
     pub cooldown_started:     Option<Instant>,
     pub cooldown_retries_left: u32,
+
+    // ── Animation State ────────────────────────────────────────────────────
+    pub streaming_started_at: Option<Instant>,
 }
 
 impl App {
@@ -102,6 +105,8 @@ impl App {
             cooldown_deadline:    None,
             cooldown_started:     None,
             cooldown_retries_left: 0,
+
+            streaming_started_at: None,
         }
     }
 
@@ -132,14 +137,23 @@ impl App {
 
     /// Mark streaming as started; updates model status.
     pub fn start_streaming(&mut self) {
-        self.streaming    = true;
-        self.model_status = ModelStatus::Thinking;
+        self.streaming           = true;
+        self.model_status        = ModelStatus::Thinking;
+        self.streaming_started_at = Some(Instant::now());
     }
 
     /// Mark streaming as complete; resets model status to ready.
     pub fn end_streaming(&mut self) {
-        self.streaming    = false;
-        self.model_status = ModelStatus::Ready;
+        self.streaming           = false;
+        self.model_status        = ModelStatus::Ready;
+        self.streaming_started_at = None;
+    }
+
+    /// Returns elapsed milliseconds since streaming started.
+    pub fn streaming_elapsed_ms(&self) -> Option<u64> {
+        self.streaming_started_at.map(|started| {
+            started.elapsed().as_millis() as u64
+        })
     }
 
     /// Set error state; used when LLM returns an error.
