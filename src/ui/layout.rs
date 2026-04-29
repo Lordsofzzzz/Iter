@@ -24,7 +24,7 @@ const HEADER_HEIGHT: u16 = 1;
 const ANIMATION_HEIGHT: u16 = 1;
 
 /// Height of the input area.
-const INPUT_HEIGHT: u16 = 2;
+const INPUT_HEIGHT: u16 = 3;
 
 /// Chat panel width as percentage of main content area.
 const CHAT_PANEL_WIDTH_PCT: u16 = 75;
