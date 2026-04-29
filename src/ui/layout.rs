@@ -103,7 +103,7 @@ pub fn ui(f: &mut Frame, app: &App) {
             let frame = get_breathing_frame(elapsed_ms);
             let (char1, status) = frame;
             let anim = Paragraph::new(Line::from(vec![
-                Span::styled(format!("{} {}...", char1, status), theme::ACCENT),
+                Span::styled(format!(" {} {}...", char1, status), theme::ACCENT),
             ]));
             f.render_widget(anim, root[3]);
         }
