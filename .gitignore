@@ -1,0 +1,16 @@
+# Rust
+target/
+
+# Logs
+*.log
+agent/logs/
+
+# Build outputs
+agent/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
