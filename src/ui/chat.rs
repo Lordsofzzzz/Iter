@@ -105,9 +105,10 @@ fn render_user_message(content: &str, width: usize, out: &mut Vec<Line>) {
 
     let border_color = theme::BUBBLE_USER_BORDER.fg.unwrap_or(Color::Cyan);
 
+    let border_line_len = width.saturating_sub(4);
     out.push(Line::from(vec![
         Span::styled("┌─", Style::new().fg(border_color)),
-        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+        Span::styled(" ".repeat(border_line_len), theme::DIM),
     ]));
 
     for (i, chunk) in wrapped.into_iter().enumerate() {
@@ -121,7 +122,7 @@ fn render_user_message(content: &str, width: usize, out: &mut Vec<Line>) {
 
     out.push(Line::from(vec![
         Span::styled("└─", Style::new().fg(border_color)),
-        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+        Span::styled(" ".repeat(border_line_len), theme::DIM),
     ]));
 }
 
@@ -134,9 +135,10 @@ fn render_assistant_message(content: &str, width: usize, out: &mut Vec<Line>) {
 
     let border_color = theme::BUBBLE_ASSISTANT_BORDER.fg.unwrap_or(Color::Green);
 
+    let border_line_len = width.saturating_sub(4);
     out.push(Line::from(vec![
         Span::styled("┌─", Style::new().fg(border_color)),
-        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+        Span::styled(" ".repeat(border_line_len), theme::DIM),
     ]));
 
     for (i, chunk) in wrapped.into_iter().enumerate() {
@@ -150,7 +152,7 @@ fn render_assistant_message(content: &str, width: usize, out: &mut Vec<Line>) {
 
     out.push(Line::from(vec![
         Span::styled("└─", Style::new().fg(border_color)),
-        Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
+        Span::styled(" ".repeat(border_line_len), theme::DIM),
     ]));
 }
 
