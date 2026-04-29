@@ -1,16 +1,14 @@
 //! Chat panel widget - renders message history.
 //!
 //! Displays user messages, assistant responses, tool calls/results,
-//! system errors, and rate limit status with appropriate styling.
-
-use std::time::Instant;
+//! and system errors with appropriate styling.
 
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Paragraph, Widget},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 
 use crate::state::{App, MsgKind};
@@ -85,14 +83,14 @@ impl<'a> Widget for ChatPanel<'a> {
 // ============================================================================
 
 /// Renders a single message based on its kind.
-fn render_message<'a>(msg: &'a crate::state::ChatMessage, app: &'a crate::state::App, width: usize, out: &mut Vec<Line<'a>>) {
+fn render_message<'a>(msg: &'a crate::state::ChatMessage, _app: &'a crate::state::App, width: usize, out: &mut Vec<Line<'a>>) {
     match msg.kind {
         MsgKind::User => render_user_message(&msg.content, width, out),
         MsgKind::Assistant => render_assistant_message(&msg.content, width, out),
         MsgKind::ToolCall => render_tool_call(&msg.content, out),
         MsgKind::ToolResult => render_tool_result(&msg.content, out),
         MsgKind::System => render_system_message(&msg.content, width, out),
-        MsgKind::RateLimit => render_rate_limit(app, out),
+        MsgKind::RateLimit => {}, // handled in animation area
     }
 }
 
@@ -186,34 +184,6 @@ fn render_system_message(content: &str, width: usize, out: &mut Vec<Line>) {
             ]));
         }
     }
-}
-
-/// Renders rate limit message with countdown.
-fn render_rate_limit(app: &crate::state::App, out: &mut Vec<Line>) {
-    let now = Instant::now();
-
-    let (remaining_ms, retries_left) = if let Some(dl) = app.cooldown_deadline {
-        let rem = dl.saturating_duration_since(now).as_millis() as u64;
-        (rem, app.cooldown_retries_left)
-    } else {
-        (0, 0)
-    };
-
-    let secs = (remaining_ms + 999) / 1000; // ceil
-
-    let label = if secs > 0 {
-        format!(
-            "  rate limited [{}]  ({} left)",
-            secs,
-            retries_left,
-        )
-    } else {
-        format!("  rate limited [·]  ({} left)", retries_left)
-    };
-
-    out.push(Line::from(vec![
-        Span::styled(label, theme::WARNING),
-    ]));
 }
 
 /// Word-wrap text to fit within the given width.

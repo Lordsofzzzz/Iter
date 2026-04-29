@@ -184,13 +184,6 @@ impl App {
         self.cooldown_deadline    = Some(now + std::time::Duration::from_millis(wait_ms));
         self.cooldown_started     = Some(now);
         self.cooldown_retries_left = retries_left;
-
-        // Only add rate limit message if not already present.
-        let already_present = self.messages.iter().any(|m| m.kind == MsgKind::RateLimit);
-        if !already_present {
-            self.messages.push(ChatMessage { kind: MsgKind::RateLimit, content: String::new() });
-            self.scroll_to_bottom();
-        }
     }
 
     /// Clear rate limit state after cooldown expires or retry succeeds.

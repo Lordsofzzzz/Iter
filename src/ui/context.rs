@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, Paragraph, Widget},
 };
 
-use crate::state::{App, ModelStatus};
+use crate::state::App;
 use crate::ui::theme;
 
 // ============================================================================
