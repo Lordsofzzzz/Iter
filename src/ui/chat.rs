@@ -83,10 +83,23 @@ impl<'a> Widget for ChatPanel<'a> {
             } else {
                 // Show breathing skeleton animation (no content yet)
                 if let Some(elapsed_ms) = self.app.streaming_elapsed_ms() {
+                    // Show 3-line wave effect
                     let frame = get_breathing_frame(elapsed_ms);
+                    let (char1, status1) = frame;
+                    let (_, status2) = get_breathing_frame(elapsed_ms.saturating_sub(150));
+                    let (_, status3) = get_breathing_frame(elapsed_ms.saturating_sub(300));
+
                     lines.push(Line::from(vec![
                         Span::raw(ASSISTANT_INDENT),
-                        Span::styled(format!("{} thinking...", frame), theme::DIM),
+                        Span::styled(format!("{} {}...", char1, status1), theme::ACCENT),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::raw(ASSISTANT_INDENT),
+                        Span::styled(format!("  {}...", status2), theme::DIM),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::raw(ASSISTANT_INDENT),
+                        Span::styled(format!("  {}...", status3), theme::DIM),
                     ]));
                 }
             }
@@ -274,9 +287,22 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 /// Returns a breathing animation frame based on elapsed time.
-/// Cycles through box-drawing characters for a loading effect.
-fn get_breathing_frame(elapsed_ms: u64) -> char {
-    const FRAMES: [char; 10] = ['▖', '▗', '▘', '▙', '▚', '▛', '▜', '▝', '▞', '▟'];
-    let idx = (elapsed_ms / 100) as usize % FRAMES.len();
+/// Cycles through box-drawing characters with status text.
+fn get_breathing_frame(elapsed_ms: u64) -> (char, &'static str) {
+    const FRAMES: [(char, &str); 12] = [
+        ('▖', "thinking"),
+        ('▗', "thinking"),
+        ('▘', "processing"),
+        ('▙', "processing"),
+        ('▚', "generating"),
+        ('▛', "generating"),
+        ('▜', "computing"),
+        ('▝', "computing"),
+        ('▞', "creating"),
+        ('▟', "creating"),
+        ('▧', "finalizing"),
+        ('▦', "finalizing"),
+    ];
+    let idx = (elapsed_ms / 150) as usize % FRAMES.len();
     FRAMES[idx]
 }
