@@ -96,12 +96,14 @@ impl<'a> ContextPanel<'a> {
         block.render(area, buf);
 
         let tok_lines = vec![
-            token_row("input  ", self.app.tok_input, theme::TOK_INPUT),
-            token_row("output ", self.app.tok_output, theme::TOK_OUTPUT),
+            token_row("input   ", self.app.tok_input, theme::TOK_INPUT),
+            token_row("cache-in", self.app.tok_cache_read, theme::TOK_CACHE_READ),
+            token_row("cache-out", self.app.tok_cache_write, theme::TOK_CACHE_WRITE),
+            token_row("output  ", self.app.tok_output, theme::TOK_OUTPUT),
             Line::from(vec![
                 Span::styled(" ─────────────────", theme::DIM),
             ]),
-            token_row("total  ", self.app.tok_total, theme::TOK_TOTAL),
+            token_row("total   ", self.app.tok_total, theme::TOK_TOTAL),
         ];
         Paragraph::new(tok_lines).render(inner, buf);
     }
