@@ -95,6 +95,7 @@ export class LLMClient {
 
     try {
       await retry(async () => {
+        assistantText = '';  // Reset on each attempt to avoid duplication on retry.
         const result = await streamText({
           model:       openrouter.chat(MODEL_NAME),
           temperature: MODEL_TEMP,
@@ -111,11 +112,12 @@ export class LLMClient {
 
         // Extract usage info (handles multiple provider formats).
         const usage = await result.usage;
+        console.error('[DEBUG usage]', JSON.stringify(usage, null, 2));
 
-        const input  = usage?.promptTokens ?? usage?.tokensPrompt ?? 0;
-        const output = usage?.completionTokens ?? usage?.tokensCompletion ?? 0;
+        const input  = usage?.promptTokens ?? (usage as any)?.tokensPrompt ?? (usage as any)?.inputTokenCount ?? (usage as any)?.usage?.prompt_tokens ?? 0;
+        const output = usage?.completionTokens ?? (usage as any)?.tokensCompletion ?? (usage as any)?.outputTokenCount ?? (usage as any)?.usage?.completion_tokens ?? 0;
 
-        const meta = usage.providerMetadata ?? {};
+        const meta = usage?.providerMetadata ?? {};  // Fixed: safe access when usage is undefined
         const anthropicMeta = meta?.anthropic ?? {};
         const openaiMeta = meta?.openai ?? {};
 
