@@ -43,7 +43,8 @@ impl<'a> Widget for ContextPanel<'a> {
         let block = Block::default()
             .title(" CONTEXT ")
             .borders(Borders::ALL)
-            .border_style(theme::BORDER);
+            .border_style(theme::BORDER)
+            .style(ratatui::style::Style::new().bg(theme::BG));
         let inner = block.inner(area);
         block.render(area, buf);
 
@@ -91,7 +92,8 @@ impl<'a> ContextPanel<'a> {
         let block = Block::default()
             .title(" Tokens ")
             .borders(Borders::ALL)
-            .border_style(theme::BORDER);
+            .border_style(theme::BORDER)
+            .style(ratatui::style::Style::new().bg(theme::BG));
         let inner = block.inner(area);
         block.render(area, buf);
 
@@ -113,7 +115,8 @@ impl<'a> ContextPanel<'a> {
         let block = Block::default()
             .title(" Session ")
             .borders(Borders::ALL)
-            .border_style(theme::BORDER);
+            .border_style(theme::BORDER)
+            .style(ratatui::style::Style::new().bg(theme::BG));
         let inner = block.inner(area);
         block.render(area, buf);
 

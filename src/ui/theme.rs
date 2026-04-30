@@ -10,7 +10,10 @@ use ratatui::style::{Color, Modifier, Style};
 // ============================================================================
 
 pub const BORDER: Style = Style::new().fg(Color::DarkGray);
-pub const LABEL: Style = Style::new().fg(Color::DarkGray);
+pub const LABEL:  Style = Style::new().fg(Color::DarkGray);
+
+/// Near-black background — matches opencode's dark theme.
+pub const BG: Color = Color::Rgb(10, 10, 12);
 
 // ============================================================================
 // Chat Message Roles

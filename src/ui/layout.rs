@@ -5,8 +5,9 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -23,11 +24,8 @@ const HEADER_HEIGHT: u16 = 1;
 /// Height of the animation area.
 const ANIMATION_HEIGHT: u16 = 1;
 
-/// Height of the input area (base height, expands with content).
-const INPUT_HEIGHT_BASE: u16 = 3;
-
-/// Maximum height for the input area.
-const INPUT_HEIGHT_MAX: u16 = 8;
+/// Height of the input area.
+const INPUT_HEIGHT: u16 = 3;
 
 /// Chat panel width as percentage of main content area.
 const CHAT_PANEL_WIDTH_PCT: u16 = 75;
@@ -43,10 +41,8 @@ const CONTEXT_PANEL_WIDTH_PCT: u16 = 25;
 pub fn ui(f: &mut Frame, app: &App) {
     let size = f.area();
 
-    // ── INPUT ──────────────────────────────────────────────────────────────
-    // Calculate dynamic input height based on newline count
-    let input_lines = app.input.lines().count() as u16;
-    let input_height = (input_lines + 1).clamp(INPUT_HEIGHT_BASE, INPUT_HEIGHT_MAX);
+    // Paint entire terminal with dark background.
+    f.render_widget(Block::default().style(Style::new().bg(theme::BG)), size);
 
     // Vertical layout: header, main content, animation, input.
     let root = Layout::default()
@@ -55,7 +51,7 @@ pub fn ui(f: &mut Frame, app: &App) {
             Constraint::Length(HEADER_HEIGHT),
             Constraint::Min(0),
             Constraint::Length(ANIMATION_HEIGHT),
-            Constraint::Length(input_height),
+            Constraint::Length(INPUT_HEIGHT),
         ])
         .split(size);
 
@@ -75,7 +71,7 @@ pub fn ui(f: &mut Frame, app: &App) {
         Span::styled("   ", theme::DIM),
         Span::styled(format!("[{status_label}]"), status_style),
     ]))
-    .style(ratatui::style::Style::new().bg(ratatui::style::Color::Black));
+    .style(Style::new().bg(theme::BG));
     f.render_widget(header, root[0]);
 
     // ── MAIN CONTENT: Chat + Context panels ────────────────────────────────
@@ -89,9 +85,14 @@ pub fn ui(f: &mut Frame, app: &App) {
 
     use std::time::Instant;
 
-    use crate::ui::{chat::ChatPanel, context::ContextPanel};
+    use crate::ui::{chat::ChatPanel, context::ContextPanel, model_picker::ModelPicker};
     f.render_widget(ChatPanel { app }, cols[0]);
     f.render_widget(ContextPanel { app }, cols[1]);
+
+    // ── MODEL PICKER OVERLAY ───────────────────────────────────────────────
+    if app.model_picker_open {
+        f.render_widget(ModelPicker { app }, size);
+    }
 
     // ── RATE LIMIT / THINKING ANIMATION ───────────────────────────────────────
     if let Some(deadline) = app.cooldown_deadline {
@@ -116,19 +117,10 @@ pub fn ui(f: &mut Frame, app: &App) {
     }
 
     // ── INPUT ──────────────────────────────────────────────────────────────
-    // Render multiline input with proper wrapping
-    let input_text = app.input.replace('\n', "\n ❯ ");
-    let input_widget = Paragraph::new(format!(" ❯ {}", input_text))
-        .style(ratatui::style::Style::new().fg(ratatui::style::Color::White))
-        .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT))
-        .wrap(ratatui::widgets::Wrap { trim: false });
+    let input_widget = Paragraph::new(format!(" ❯ {}_", app.input))
+        .style(Style::new().fg(Color::White).bg(theme::BG))
+        .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT).style(Style::new().bg(theme::BG)));
     f.render_widget(input_widget, root[3]);
-
-    // ── MODEL PICKER OVERLAY ────────────────────────────────────────────────
-    if app.model_picker_open {
-        use crate::ui::model_picker::ModelPicker;
-        f.render_widget(ModelPicker { app }, size);
-    }
 }
 
 // ============================================================================
