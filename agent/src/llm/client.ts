@@ -21,7 +21,15 @@ import { buildSystemPrompt } from '../system-prompt.js';
 const openrouter = createOpenRouter({});
 
 /** Default model to use (fallback to Gemma 4B free). */
-export const MODEL_NAME = process.env.MODEL_NAME ?? 'minimax/minimax-m2.5:free';
+export let MODEL_NAME = process.env.MODEL_NAME ?? 'minimax/minimax-m2.5:free';
+
+/** Override the active model at runtime. */
+export function setModel(model: string): void {
+  MODULE_NAME_OVERRIDE = model;
+}
+
+// Internal mutable override (avoids re-exporting a `let` binding issues).
+let MODULE_NAME_OVERRIDE: string = MODEL_NAME;
 
 /** Context window size in tokens. */
 export const MODEL_LIMIT = 200_000;
@@ -100,7 +108,7 @@ export class LLMClient {
    * @param modelOverride - Optional model name to use instead of default
    */
   async streamResponse(userMessage: string, modelOverride?: string): Promise<void> {
-    const model = modelOverride ?? MODEL_NAME;
+    const model = modelOverride ?? MODULE_NAME_OVERRIDE;
     this.history.pushUser(userMessage);
     emitEvent({ type: 'turn_start' });
 

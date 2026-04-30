@@ -121,9 +121,22 @@ fn handle_key_input(
 ) {
 use KeyCode::*;
 
+    // ── Model picker intercepts all keys when open ──────────────────────
+    if app.model_picker_open {
+        handle_picker_key(key, app, agent_stdin);
+        return;
+    }
+
     match (key.modifiers, key.code) {
         // Quit application.
         (KeyModifiers::CONTROL, Char('c')) => app.should_quit = true,
+
+        // Open model picker.
+        (KeyModifiers::CONTROL, Char('p')) => {
+            app.model_picker_open     = true;
+            app.model_picker_query    = String::new();
+            app.model_picker_selected = 0;
+        }
 
         // Clear input buffer.
         (KeyModifiers::CONTROL, Char('u')) => app.input.clear(),
@@ -177,6 +190,76 @@ use KeyCode::*;
         (_, Char(c))   => { app.input.push(c); }
 
         // Ignore other keys (e.g., Home, End, etc.).
+        _ => {}
+    }
+}
+
+/// Handles keys while the model picker is open.
+fn handle_picker_key(
+    key:         crossterm::event::KeyEvent,
+    app:         &mut App,
+    agent_stdin: &mut Option<std::process::ChildStdin>,
+) {
+    use KeyCode::*;
+    use ui::model_picker::filtered_models;
+
+    match (key.modifiers, key.code) {
+        // Close picker.
+        (KeyModifiers::CONTROL, Char('p')) | (_, Esc) => {
+            app.model_picker_open = false;
+        }
+
+        // Navigate down.
+        (_, Down) | (KeyModifiers::CONTROL, Char('n')) => {
+            let count = filtered_models(&app.model_picker_query).len();
+            if count > 0 {
+                app.model_picker_selected = (app.model_picker_selected + 1).min(count - 1);
+            }
+        }
+
+        // Navigate up.
+        (_, Up) => {
+            app.model_picker_selected = app.model_picker_selected.saturating_sub(1);
+        }
+
+        // Also handle plain Ctrl+K for up (common in pickers).
+        (KeyModifiers::CONTROL, Char('k')) => {
+            app.model_picker_selected = app.model_picker_selected.saturating_sub(1);
+        }
+        (KeyModifiers::CONTROL, Char('j')) => {
+            let count = filtered_models(&app.model_picker_query).len();
+            if count > 0 {
+                app.model_picker_selected = (app.model_picker_selected + 1).min(count - 1);
+            }
+        }
+
+        // Select model.
+        (_, Enter) => {
+            let matches = filtered_models(&app.model_picker_query);
+            if let Some(&model_idx) = matches.get(app.model_picker_selected) {
+                let (model_id, _) = ui::model_picker::MODELS[model_idx];
+                agent::send_cmd(agent_stdin, serde_json::json!({
+                    "id": "set-model",
+                    "type": "set_model",
+                    "model": model_id,
+                }));
+                app.model_name = model_id.to_string();
+            }
+            app.model_picker_open = false;
+        }
+
+        // Backspace in search.
+        (_, Backspace) => {
+            app.model_picker_query.pop();
+            app.model_picker_selected = 0;
+        }
+
+        // Type to filter.
+        (KeyModifiers::NONE, Char(c)) => {
+            app.model_picker_query.push(c);
+            app.model_picker_selected = 0;
+        }
+
         _ => {}
     }
 }

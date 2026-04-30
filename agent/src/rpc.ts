@@ -37,6 +37,7 @@ export type PullResponse =
   | { kind: 'response'; command: 'prompt';            id?: string; success: true }
   | { kind: 'response'; command: 'abort';             id?: string; success: true }
   | { kind: 'response'; command: 'clear';             id?: string; success: true }
+  | { kind: 'response'; command: 'set_model';        id?: string; success: true;  data?: { model: string } }
   | { kind: 'response'; command: string;              id?: string; success: false; error: string };
 
 // ============================================================================

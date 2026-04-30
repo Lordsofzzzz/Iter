@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use crate::state::{App, MsgKind};
-use crate::ui::theme;
+use crate::ui::{markdown::render_markdown, theme};
 
 // ============================================================================
 // Constants
@@ -120,27 +120,30 @@ fn render_user_message(content: &str, width: usize, out: &mut Vec<Line>) {
     ]));
 }
 
-/// Renders assistant message with bubble styling.
-fn render_assistant_message(content: &str, width: usize, out: &mut Vec<Line>) {
+/// Renders assistant message with markdown rendering inside a bubble.
+fn render_assistant_message<'a>(content: &'a str, width: usize, out: &mut Vec<Line<'a>>) {
     out.push(Line::default());
 
-    let inner_content_width = width.saturating_sub(ASSISTANT_INDENT.chars().count() + 4);
-    let wrapped = wrap_text(content, inner_content_width);
-
     let border_color = theme::BUBBLE_ASSISTANT_BORDER.fg.unwrap_or(Color::Green);
+    let inner_w = width.saturating_sub(4); // 2 for border chars + 2 padding
 
     out.push(Line::from(vec![
         Span::styled("┌─", Style::new().fg(border_color)),
         Span::styled(" ".repeat(width.saturating_sub(2)), theme::DIM),
     ]));
 
-    for (i, chunk) in wrapped.into_iter().enumerate() {
-        let prefix = if i == 0 { ASSISTANT_INDENT } else { "│   " };
+    let md_lines = render_markdown(content, inner_w);
+
+    if md_lines.is_empty() {
         out.push(Line::from(vec![
             Span::styled("│ ", Style::new().fg(border_color)),
-            Span::styled(prefix, theme::DIM),
-            Span::styled(chunk, theme::ASSISTANT),
         ]));
+    } else {
+        for md_line in md_lines {
+            let mut spans = vec![Span::styled("│ ", Style::new().fg(border_color))];
+            spans.extend(md_line.spans);
+            out.push(Line::from(spans));
+        }
     }
 
     out.push(Line::from(vec![

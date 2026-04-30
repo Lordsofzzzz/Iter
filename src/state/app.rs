@@ -63,6 +63,11 @@ pub struct App {
     // ── Application Control ──────────────────────────────────────────────────
     pub should_quit: bool,
 
+    // ── Model Picker State ───────────────────────────────────────────────────
+    pub model_picker_open: bool,
+    pub model_picker_query: String,
+    pub model_picker_selected: usize,
+
     // ── Rate Limiting State ─────────────────────────────────────────────────
     pub cooldown_deadline:    Option<Instant>,
     pub cooldown_started:     Option<Instant>,
@@ -101,6 +106,10 @@ impl App {
             model_status: ModelStatus::Ready,
 
             should_quit: false,
+
+            model_picker_open: false,
+            model_picker_query: String::new(),
+            model_picker_selected: 0,
 
             cooldown_deadline:    None,
             cooldown_started:     None,

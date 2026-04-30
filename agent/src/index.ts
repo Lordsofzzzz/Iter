@@ -5,7 +5,7 @@
  * Communicates with the Rust TUI via JSONL over stdin/stdout.
  */
 
-import { LLMClient, MODEL_NAME, MODEL_LIMIT, clearHistory } from './llm/index.js';
+import { LLMClient, MODEL_NAME, MODEL_LIMIT, clearHistory, setModel } from './llm/index.js';
 import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
 
 // ============================================================================
@@ -83,6 +83,17 @@ readStdinLines(async (line: string) => {
         success: true,
         data,
       });
+      break;
+    }
+
+    case 'set_model': {
+      const model = typeof (payload as any).model === 'string' ? (payload as any).model : undefined;
+      if (!model) {
+        emitResponse({ kind: 'response', command: 'set_model', id, success: false, error: 'model field required' });
+        break;
+      }
+      setModel(model);
+      emitResponse({ kind: 'response', command: 'set_model', id, success: true });
       break;
     }
 

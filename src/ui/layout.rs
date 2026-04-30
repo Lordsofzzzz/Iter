@@ -123,6 +123,12 @@ pub fn ui(f: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT))
         .wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(input_widget, root[3]);
+
+    // ── MODEL PICKER OVERLAY ────────────────────────────────────────────────
+    if app.model_picker_open {
+        use crate::ui::model_picker::ModelPicker;
+        f.render_widget(ModelPicker { app }, size);
+    }
 }
 
 // ============================================================================

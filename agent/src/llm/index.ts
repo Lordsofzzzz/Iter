@@ -4,7 +4,7 @@
  * Re-exports core LLM functionality for external use.
  */
 
-export { LLMClient, MODEL_NAME, MODEL_LIMIT, MODEL_TEMP } from './client.js';
+export { LLMClient, MODEL_NAME, MODEL_LIMIT, MODEL_TEMP, setModel } from './client.js';
 export { History } from './history.js';
 export { Stats, type SessionStats } from './stats.js';
 
