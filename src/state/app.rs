@@ -181,12 +181,24 @@ impl App {
                 return;
             }
         }
-        self.messages.push(ChatMessage { kind: MsgKind::Assistant, content: delta });
+        self.messages.push(ChatMessage { kind: MsgKind::Assistant, content: delta, thinking: String::new() });
+    }
+
+    /// Append reasoning delta to the last assistant message's thinking field.
+    pub fn push_thinking_delta(&mut self, delta: String) {
+        if let Some(last) = self.messages.last_mut() {
+            if matches!(last.kind, MsgKind::Assistant) {
+                last.thinking.push_str(&delta);
+                return;
+            }
+        }
+        // No current assistant message — create one to hold the thinking.
+        self.messages.push(ChatMessage { kind: MsgKind::Assistant, content: String::new(), thinking: delta });
     }
 
     /// Add a system message (error, warning, etc.) to the chat.
     pub fn push_system(&mut self, text: String) {
-        self.messages.push(ChatMessage { kind: MsgKind::System, content: text });
+        self.messages.push(ChatMessage { kind: MsgKind::System, content: text, thinking: String::new() });
     }
 
     /// Update rate limit state when a 429 is received.

@@ -7,6 +7,7 @@
 
 import { LLMClient, MODEL_NAME, MODEL_LIMIT, clearHistory, setModel } from './llm/index.js';
 import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
+import { logToFile } from './utils/logger.js';
 
 // ============================================================================
 // Configuration
@@ -39,6 +40,9 @@ emitEvent({ type: 'agent_start' });
  * Main stdin handler — parses JSON commands from TUI.
  */
 readStdinLines(async (line: string) => {
+  // Log incoming command from TUI
+  logToFile(`[IN] ${line}`);
+
   let payload: unknown;
 
   try {

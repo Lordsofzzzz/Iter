@@ -28,6 +28,8 @@ pub enum MsgKind {
 pub struct ChatMessage {
     pub kind: MsgKind,
     pub content: String,
+    /// Accumulated reasoning text, kept separate from response content.
+    pub thinking: String,
 }
 
 /// Current status of the LLM model (affects UI indicators).
@@ -54,6 +56,7 @@ pub enum PushEvent {
     TurnEnd,
     AgentEnd,
     TextDelta { delta: String },
+    ThinkingDelta { delta: String },
     Error { message: String },
     Cooldown { wait_ms: u64, retries_left: u32 },
     RetryResult { success: bool, attempt: u32 },
@@ -145,7 +148,10 @@ pub fn parse_line(line: &str) -> AgentMessage {
     // Peek at envelope to determine message direction.
     let envelope: RawEnvelope = match serde_json::from_str(line) {
         Ok(e)  => e,
-        Err(_) => return AgentMessage::Unknown { raw: line.to_string() },
+        Err(_) => {
+            // eprintln!("[RPC PARSE ERROR] envelope: {e}");  // Disabled to prevent TUI corruption
+            return AgentMessage::Unknown { raw: line.to_string() };
+        }
     };
 
     match envelope.kind.as_deref() {
@@ -153,9 +159,12 @@ pub fn parse_line(line: &str) -> AgentMessage {
         Some("response") => {
             match serde_json::from_str::<PullResponse>(line) {
                 Ok(r)  => AgentMessage::Pull(r),
-                Err(e) => AgentMessage::Unknown {
-                    raw: format!("pull-parse-err: {e} | {line}"),
-                },
+                Err(_) => {
+                    // eprintln!("[RPC PARSE ERROR] pull: {e}");  // Disabled to prevent TUI corruption
+                    AgentMessage::Unknown {
+                        raw: format!("pull-parse-err: {line}"),
+                    }
+                }
             }
         }
         // No `kind` field means push event.

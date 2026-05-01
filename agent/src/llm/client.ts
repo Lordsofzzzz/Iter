@@ -5,7 +5,7 @@
  * from the language model.
  */
 
-import { streamText } from 'ai';
+import { streamText, wrapLanguageModel, extractReasoningMiddleware } from 'ai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { emitEvent, SessionStatsData } from '../rpc.js';
 import { retry } from '../utils/retry.js';
@@ -103,12 +103,8 @@ export class LLMClient {
    *
    * Updates history, emits text deltas, tracks tokens/cost,
    * and handles errors gracefully.
-   *
-   * @param userMessage - The user's input message
-   * @param modelOverride - Optional model name to use instead of default
    */
-  async streamResponse(userMessage: string, modelOverride?: string): Promise<void> {
-    const model = modelOverride ?? MODULE_NAME_OVERRIDE;
+  async streamResponse(userMessage: string): Promise<void> {
     this.history.pushUser(userMessage);
     emitEvent({ type: 'turn_start' });
 
@@ -118,37 +114,53 @@ export class LLMClient {
     try {
       await retry(async () => {
         assistantText = '';  // Reset on each attempt to avoid duplication on retry.
+        
+        const model = wrapLanguageModel({
+          model: openrouter.chat(MODULE_NAME_OVERRIDE),
+          middleware: extractReasoningMiddleware({ tagName: 'thinking' }),
+        });
+
+        const isThinkingModel = MODULE_NAME_OVERRIDE.includes(':thinking') ||
+          MODULE_NAME_OVERRIDE.includes('deepseek-r') ||
+          MODULE_NAME_OVERRIDE.includes('qwq') ||
+          MODULE_NAME_OVERRIDE.includes('minimax') ||
+          MODULE_NAME_OVERRIDE.includes('r1') ||
+          MODULE_NAME_OVERRIDE.includes('reasoning');
+
         const result = await streamText({
-          model:       openrouter.chat(model),
+          model,
           temperature: MODEL_TEMP,
           system:      buildSystemPrompt(),
           messages:    this.history.get(),
           tools,
-          maxSteps:    20,
           abortSignal: this.abortController!.signal,
           onError:     () => {},
-          onStepFinish: ({ toolCalls, toolResults }) => {
-            for (const tc of toolCalls ?? []) {
-              emitEvent({
-                type:  'tool_call',
-                name:  tc.toolName,
-                input: JSON.stringify(tc.args),
-              });
-            }
-            for (const tr of toolResults ?? []) {
-              emitEvent({
-                type:   'tool_result',
-                name:   tr.toolName,
-                output: String(tr.result).slice(0, 500), // truncate for TUI
-              });
-            }
-          },
+          ...(isThinkingModel ? {
+            providerOptions: {
+              openrouter: { reasoning: { max_tokens: 8000 } },
+            },
+          } : {}),
         });
 
-        // Stream text deltas to TUI.
-        for await (const chunk of result.textStream) {
-          assistantText += chunk;
-          emitEvent({ type: 'text_delta', delta: chunk });
+        // Stream text and reasoning deltas to TUI.
+        for await (const chunk of result.fullStream) {
+          const c = chunk as any;
+          switch (c.type) {
+            case 'reasoning-start':
+            case 'reasoning-end':
+              break;
+            case 'reasoning-delta': {
+              const delta: string = c.text ?? c.textDelta ?? '';
+              if (delta) emitEvent({ type: 'thinking_delta', delta });
+              break;
+            }
+            case 'text-delta': {
+              const delta: string = c.text ?? c.textDelta ?? '';
+              assistantText += delta;
+              emitEvent({ type: 'text_delta', delta });
+              break;
+            }
+          }
         }
 
         // Extract usage info (handles multiple provider formats).
@@ -158,7 +170,7 @@ export class LLMClient {
         const input  = (usage as any)?.inputTokens ?? usage?.promptTokens ?? 0;
         const output = (usage as any)?.outputTokens ?? usage?.completionTokens ?? 0;
 
-        const meta = usage?.providerMetadata ?? {};  // Fixed: safe access when usage is undefined
+        const meta = usage?.providerMetadata ?? {};
         const anthropicMeta = meta?.anthropic ?? {};
         const openaiMeta = meta?.openai ?? {};
 

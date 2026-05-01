@@ -173,6 +173,7 @@ use KeyCode::*;
                 app.messages.push(ChatMessage {
                     kind: MsgKind::User,
                     content: text,
+                    thinking: String::new(),
                 });
                 app.input.clear();
                 app.scroll_to_bottom();

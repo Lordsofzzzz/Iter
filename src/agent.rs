@@ -60,6 +60,7 @@ pub fn spawn_agent(tx: Sender<UiEvent>) -> Option<std::process::ChildStdin> {
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines().flatten() {
+            // eprintln!("[AGENT→TUI] {}", line);  // Debug logging - disabled to prevent TUI corruption
             let msg = rpc::parse_line(&line);
             let _ = tx_clone.send(UiEvent::Agent(msg));
         }
@@ -70,6 +71,7 @@ pub fn spawn_agent(tx: Sender<UiEvent>) -> Option<std::process::ChildStdin> {
 
 /// Sends a JSON command to the agent over stdin.
 pub fn send_cmd(agent_stdin: &mut Option<std::process::ChildStdin>, payload: serde_json::Value) {
+    // eprintln!("[TUI→AGENT] {}", payload);  // Debug logging - disabled to prevent TUI corruption
     if let Some(ref mut stdin) = agent_stdin {
         let _ = writeln!(stdin, "{}", payload);
     }
@@ -128,6 +130,11 @@ fn handle_push_event(
 
         PushEvent::TextDelta { delta } => {
             app.push_assistant_delta(delta);
+            app.scroll_to_bottom();
+        }
+
+        PushEvent::ThinkingDelta { delta } => {
+            app.push_thinking_delta(delta);
             app.scroll_to_bottom();
         }
 

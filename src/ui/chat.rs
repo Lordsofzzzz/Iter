@@ -65,7 +65,7 @@ impl<'a> Widget for ChatPanel<'a> {
 fn render_message(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<Line>) {
     match msg.kind {
         MsgKind::User      => render_user_bubble(&msg.content, width, out),
-        MsgKind::Assistant => render_assistant_bubble(&msg.content, width, out),
+        MsgKind::Assistant => render_assistant_bubble(msg, width, out),
         MsgKind::ToolCall  => render_tool_call(&msg.content, out),
         MsgKind::ToolResult=> render_tool_result(&msg.content, out),
         MsgKind::System    => render_system_message(&msg.content, width, out),
@@ -92,12 +92,31 @@ fn render_user_bubble(content: &str, width: usize, out: &mut Vec<Line>) {
 // Assistant bubble — green left bar, markdown content
 // ============================================================================
 
-fn render_assistant_bubble(content: &str, width: usize, out: &mut Vec<Line>) {
+fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<Line>) {
     let inner_w = width.saturating_sub(3);
     out.push(Line::default());
-    for md_line in render_markdown(content, inner_w) {
+
+    // Render thinking block first if present — no green bar, italic gray.
+    if !msg.thinking.trim().is_empty() {
+        let thinking_style = Style::new()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC);
+        for raw_line in msg.thinking.lines() {
+            let t = raw_line.trim_end();
+            if !t.is_empty() {
+                out.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(t.to_string(), thinking_style),
+                ]));
+            }
+        }
+        out.push(Line::default()); // blank separator before response
+    }
+
+    // Render response content with green bar.
+    for line in render_markdown(&msg.content, inner_w) {
         let mut spans: Vec<Span<'static>> = vec![Span::styled("│ ", Style::new().fg(Color::Green))];
-        spans.extend(md_line.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)));
+        spans.extend(line.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)));
         out.push(Line::from(spans));
     }
 }

@@ -18,6 +18,7 @@ export type PushEvent =
   | { type: 'agent_start' }
   | { type: 'turn_start' }
   | { type: 'text_delta'; delta: string }
+  | { type: 'thinking_delta'; delta: string }
   | { type: 'turn_end' }
   | { type: 'agent_end' }
   | { type: 'error'; message: string }
@@ -88,9 +89,9 @@ export type RpcMessage = PushEvent | PullResponse;
  * Uses LF-only framing to avoid corruption on Windows.
  */
 function writeLine(obj: unknown): void {
-  const json = JSON.stringify(obj) + '\n';
-  process.stdout.write(json);
-  logToFile(json.trim());
+  const json = JSON.stringify(obj);
+  process.stdout.write(json + '\n');
+  logToFile(`[OUT] ${json}`);
 }
 
 /** Emits a push event to the TUI. */
