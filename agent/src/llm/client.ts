@@ -8,7 +8,6 @@
 import { streamText, wrapLanguageModel, extractReasoningMiddleware } from 'ai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { emitEvent, SessionStatsData } from '../rpc.js';
-import { logToFile } from '../utils/logger.js';
 import { retry } from '../utils/retry.js';
 import { History } from './history.js';
 import { Stats } from './stats.js';
@@ -146,7 +145,6 @@ export class LLMClient {
 
         // Stream text and reasoning deltas to TUI.
         for await (const chunk of result.fullStream) {
-          logToFile(`[CHUNK] ${JSON.stringify(chunk)}`);
           switch (chunk.type) {
             case 'reasoning-delta': {
               const delta: string = (chunk as any).textDelta ?? (chunk as any).text ?? '';
