@@ -8,6 +8,7 @@
 import { streamText, wrapLanguageModel, extractReasoningMiddleware } from 'ai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { emitEvent, SessionStatsData } from '../rpc.js';
+import { logToFile } from '../utils/logger.js';
 import { retry } from '../utils/retry.js';
 import { History } from './history.js';
 import { Stats } from './stats.js';
@@ -104,7 +105,8 @@ export class LLMClient {
    * Updates history, emits text deltas, tracks tokens/cost,
    * and handles errors gracefully.
    */
-  async streamResponse(userMessage: string): Promise<void> {
+  async streamResponse(userMessage: string, model?: string): Promise<void> {
+    if (model) MODULE_NAME_OVERRIDE = model;
     this.history.pushUser(userMessage);
     emitEvent({ type: 'turn_start' });
 
@@ -144,20 +146,19 @@ export class LLMClient {
 
         // Stream text and reasoning deltas to TUI.
         for await (const chunk of result.fullStream) {
-          const c = chunk as any;
-          switch (c.type) {
-            case 'reasoning-start':
-            case 'reasoning-end':
-              break;
+          logToFile(`[CHUNK] ${JSON.stringify(chunk)}`);
+          switch (chunk.type) {
             case 'reasoning-delta': {
-              const delta: string = c.text ?? c.textDelta ?? '';
+              const delta: string = (chunk as any).textDelta ?? (chunk as any).text ?? '';
               if (delta) emitEvent({ type: 'thinking_delta', delta });
               break;
             }
             case 'text-delta': {
-              const delta: string = c.text ?? c.textDelta ?? '';
-              assistantText += delta;
-              emitEvent({ type: 'text_delta', delta });
+              const delta: string = (chunk as any).textDelta ?? (chunk as any).text ?? '';
+              if (delta) {
+                assistantText += delta;
+                emitEvent({ type: 'text_delta', delta });
+              }
               break;
             }
           }

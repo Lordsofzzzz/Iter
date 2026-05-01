@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "ts-node src/index.ts",
     "test": "node -e \"console.log('no tests yet')\""
   },
   "dependencies": {
@@ -13,7 +12,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   }
 }

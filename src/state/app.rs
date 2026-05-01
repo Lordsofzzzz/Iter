@@ -5,7 +5,30 @@
 
 use std::time::Instant;
 
-use crate::rpc::{ChatMessage, MsgKind, ModelStatus};
+#[derive(Clone, PartialEq)]
+pub enum MsgKind {
+    User,
+    Assistant,
+    ToolCall,
+    ToolResult,
+    System,
+    RateLimit,
+}
+
+#[derive(Clone)]
+pub struct ChatMessage {
+    pub kind: MsgKind,
+    pub content: String,
+    pub thinking: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum ModelStatus {
+    Ready,
+    Thinking,
+    Error,
+    Cooldown,
+}
 
 // ============================================================================
 // Constants (extracted from magic numbers)

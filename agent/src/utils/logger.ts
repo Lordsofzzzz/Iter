@@ -43,16 +43,3 @@ export function logToFile(message: string): void {
     // Silently ignore write errors.
   }
 }
-
-/**
- * Clears the log file (useful for testing).
- */
-export function clearLogFile(): void {
-  try {
-    if (fs.existsSync(LOG_FILE)) {
-      fs.writeFileSync(LOG_FILE, '', 'utf8');
-    }
-  } catch {
-    // Silently ignore errors.
-  }
-}

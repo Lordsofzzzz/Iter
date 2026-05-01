@@ -7,40 +7,7 @@
 
 use serde::Deserialize;
 
-// ============================================================================
-// Chat Message Types (used by UI for rendering)
-// ============================================================================
-
-/// Kind of chat message, determines styling in the UI.
-#[derive(Clone, PartialEq)]
-#[allow(dead_code)]
-pub enum MsgKind {
-    User,
-    Assistant,
-    ToolCall,
-    ToolResult,
-    System,
-    RateLimit,
-}
-
-/// A single message in the chat history.
-#[derive(Clone)]
-pub struct ChatMessage {
-    pub kind: MsgKind,
-    pub content: String,
-    /// Accumulated reasoning text, kept separate from response content.
-    pub thinking: String,
-}
-
-/// Current status of the LLM model (affects UI indicators).
-#[derive(Clone, PartialEq)]
-#[allow(dead_code)]
-pub enum ModelStatus {
-    Ready,
-    Thinking,
-    Error,
-    Cooldown,
-}
+use crate::state::{ChatMessage, MsgKind, ModelStatus};
 
 // ============================================================================
 // Push Events: Agent → TUI (unprompted)

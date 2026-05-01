@@ -10,7 +10,7 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 use crate::rpc::{self, AgentMessage, PushEvent, StateData, UiEvent};
-use crate::state::ModelStatus;
+use crate::state::{ChatMessage, MsgKind, ModelStatus};
 
 // ============================================================================
 // Constants
@@ -174,12 +174,20 @@ fn handle_push_event(
         }
 
         PushEvent::ToolCall { name, input } => {
-            app.push_system(format!("▶ {name}({input})"));
+            app.messages.push(ChatMessage {
+                kind: MsgKind::ToolCall,
+                content: format!("▶ {name}({input})"),
+                thinking: String::new(),
+            });
             app.tool_calls += 1;
         }
 
         PushEvent::ToolResult { name, output } => {
-            app.push_system(format!("◀ {name}: {output}"));
+            app.messages.push(ChatMessage {
+                kind: MsgKind::ToolResult,
+                content: format!("◀ {name}: {output}"),
+                thinking: String::new(),
+            });
         }
     }
 }

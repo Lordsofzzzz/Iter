@@ -26,8 +26,8 @@ export const tools = {
     execute: async ({ path }) => {
       try {
         return await readFile(path, 'utf-8');
-      } catch (e: any) {
-        return `ERROR: ${e.message}`;
+      } catch (e) {
+        return `ERROR: ${e instanceof Error ? e.message : String(e)}`;
       }
     },
   }),
@@ -43,8 +43,8 @@ export const tools = {
         await mkdir(dirname(path), { recursive: true });
         await writeFile(path, content, 'utf-8');
         return `OK: wrote ${path}`;
-      } catch (e: any) {
-        return `ERROR: ${e.message}`;
+      } catch (e) {
+        return `ERROR: ${e instanceof Error ? e.message : String(e)}`;
       }
     },
   }),
@@ -87,8 +87,8 @@ export const tools = {
         const lines: string[] = [];
         await walk(path, path, depth, lines);
         return lines.join('\n') || '(empty)';
-      } catch (e: any) {
-        return `ERROR: ${e.message}`;
+      } catch (e) {
+        return `ERROR: ${e instanceof Error ? e.message : String(e)}`;
       }
     },
   }),

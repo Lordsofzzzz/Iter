@@ -18,6 +18,8 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::ui::utils::word_wrap;
+
 // ============================================================================
 // Theme Styles (local — mirrors theme.rs but owned here for independence)
 // ============================================================================
@@ -244,6 +246,8 @@ fn parse_ordered(s: &str) -> Option<(usize, &str)> {
 // Inline renderer
 // ============================================================================
 
+/// Renders inline markdown spans. Returns owned `Span<'static>` — all
+/// content is cloned from the input, not borrowed.
 fn inline_spans(s: &str) -> Vec<Span<'static>> {
     let mut out   = Vec::new();
     let chars: Vec<char> = s.chars().collect();
@@ -357,40 +361,4 @@ fn try_parse_multi(chars: &[char], marker: &str) -> Option<(String, usize)> {
         j += 1;
     }
     None
-}
-
-// ============================================================================
-// Word wrap (preserves existing newlines)
-// ============================================================================
-
-fn word_wrap(text: &str, width: usize) -> Vec<String> {
-    if width == 0 { return vec![String::new()]; }
-    let mut out = Vec::new();
-    for raw_line in text.split('\n') {
-        if raw_line.is_empty() { out.push(String::new()); continue; }
-        let mut cur = String::new();
-        for word in raw_line.split_whitespace() {
-            let wl = word.chars().count();
-            if wl > width {
-                if !cur.is_empty() { out.push(std::mem::take(&mut cur)); }
-                let mut chunk = String::new();
-                for ch in word.chars() {
-                    if chunk.chars().count() >= width { out.push(std::mem::take(&mut chunk)); }
-                    chunk.push(ch);
-                }
-                cur = chunk;
-            } else if cur.is_empty() {
-                cur.push_str(word);
-            } else if cur.chars().count() + 1 + wl <= width {
-                cur.push(' ');
-                cur.push_str(word);
-            } else {
-                out.push(std::mem::take(&mut cur));
-                cur.push_str(word);
-            }
-        }
-        if !cur.is_empty() { out.push(cur); }
-    }
-    if out.is_empty() { out.push(String::new()); }
-    out
 }

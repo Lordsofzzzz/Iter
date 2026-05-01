@@ -7,9 +7,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
+
+use std::time::Instant;
 
 use crate::state::App;
 use crate::ui::theme;
@@ -82,8 +84,6 @@ pub fn ui(f: &mut Frame, app: &App) {
             Constraint::Percentage(CONTEXT_PANEL_WIDTH_PCT),
         ])
         .split(root[1]);
-
-    use std::time::Instant;
 
     use crate::ui::{chat::ChatPanel, context::ContextPanel, model_picker::ModelPicker};
     f.render_widget(ChatPanel { app }, cols[0]);

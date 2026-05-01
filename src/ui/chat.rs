@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::state::{App, MsgKind};
+use crate::ui::utils::word_wrap;
 use crate::ui::{markdown::render_markdown, theme};
 
 // ============================================================================
@@ -80,7 +81,7 @@ fn render_message(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<L
 fn render_user_bubble(content: &str, width: usize, out: &mut Vec<Line>) {
     let inner_w = width.saturating_sub(3); // "│ " = 2 chars + 1 space
     out.push(Line::default());
-    for chunk in wrap_text(content, inner_w) {
+    for chunk in word_wrap(content, inner_w) {
         out.push(Line::from(vec![
             Span::styled("│ ", Style::new().fg(Color::Cyan)),
             Span::styled(chunk, Style::new().fg(Color::White).add_modifier(Modifier::BOLD)),
@@ -141,7 +142,7 @@ fn render_tool_result(content: &str, out: &mut Vec<Line>) {
 
 fn render_system_message(content: &str, width: usize, out: &mut Vec<Line>) {
     let content_width = width.saturating_sub(SYSTEM_PREFIX.chars().count());
-    for (i, chunk) in wrap_text(content, content_width).into_iter().enumerate() {
+    for (i, chunk) in word_wrap(content, content_width).into_iter().enumerate() {
         if i == 0 {
             out.push(Line::from(vec![
                 Span::styled(SYSTEM_PREFIX, theme::ERROR),
@@ -154,42 +155,4 @@ fn render_system_message(content: &str, width: usize, out: &mut Vec<Line>) {
             ]));
         }
     }
-}
-
-// ============================================================================
-// Word wrap
-// ============================================================================
-
-fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    if width == 0 { return vec![String::new()]; }
-    let mut out = Vec::new();
-    for raw_line in text.split('\n') {
-        if raw_line.is_empty() { out.push(String::new()); continue; }
-        let mut current = String::new();
-        for word in raw_line.split_whitespace() {
-            let wl = word.chars().count();
-            if wl > width {
-                if !current.is_empty() { out.push(std::mem::take(&mut current)); }
-                let mut chunk = String::new();
-                for ch in word.chars() {
-                    if chunk.chars().count() >= width { out.push(std::mem::take(&mut chunk)); }
-                    chunk.push(ch);
-                }
-                current = chunk;
-                continue;
-            }
-            if current.is_empty() {
-                current.push_str(word);
-            } else if current.chars().count() + 1 + wl <= width {
-                current.push(' ');
-                current.push_str(word);
-            } else {
-                out.push(std::mem::take(&mut current));
-                current.push_str(word);
-            }
-        }
-        if !current.is_empty() { out.push(current); }
-    }
-    if out.is_empty() { out.push(String::new()); }
-    out
 }

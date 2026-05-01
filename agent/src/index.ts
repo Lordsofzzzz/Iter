@@ -91,7 +91,7 @@ readStdinLines(async (line: string) => {
     }
 
     case 'set_model': {
-      const model = typeof (payload as any).model === 'string' ? (payload as any).model : undefined;
+      const model = payload.model;
       if (!model) {
         emitResponse({ kind: 'response', command: 'set_model', id, success: false, error: 'model field required' });
         break;
@@ -241,7 +241,12 @@ function handleSlashCommand(text: string, id?: string): void {
 // ============================================================================
 
 /** Type guard for command payload. */
-function isCommandPayload(value: unknown): value is { id?: string; type: string; content?: string } {
+function isCommandPayload(value: unknown): value is {
+  id?: string;
+  type: string;
+  content?: string;
+  model?: string;
+} {
   return (
     typeof value === 'object' &&
     value !== null &&

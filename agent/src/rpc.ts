@@ -77,9 +77,6 @@ export interface SessionStatsData {
   turns:         number;
 }
 
-/** Union type for any RPC message. */
-export type RpcMessage = PushEvent | PullResponse;
-
 // ============================================================================
 // Emitters (stdout)
 // ============================================================================
@@ -102,11 +99,6 @@ export function emitEvent(event: PushEvent): void {
 /** Emits a pull response to the TUI. */
 export function emitResponse(response: PullResponse): void {
   writeLine(response);
-}
-
-/** Backward compatibility wrapper. */
-export function emitRPC(event: RpcMessage): void {
-  writeLine(event);
 }
 
 // ============================================================================
