@@ -44,6 +44,16 @@ async function handleCommand(cmd: any) {
       if (content.includes('error')) {
         await sleep(200);
         emit({ type: 'error', message: 'Simulated LLM Error' });
+      } else if (content.includes('tool')) {
+        emit({ type: 'text_delta', delta: 'Running a tool... ' });
+        await sleep(500);
+        emit({ type: 'tool_call', name: 'run_command', input: '{"cmd":"ls"}' });
+        await sleep(500);
+        emit({ type: 'tool_update', tool_call_id: 'tool-1', delta: 'Listing files...\n' });
+        await sleep(300);
+        emit({ type: 'tool_result', name: 'run_command', output: 'file1.txt\nfile2.txt' });
+        await sleep(200);
+        emit({ type: 'text_delta', delta: '\nTool finished.' });
       } else {
         // Default Echo
         await sleep(200);
