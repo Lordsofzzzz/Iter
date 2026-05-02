@@ -29,6 +29,7 @@ pub enum PushEvent {
     RetryResult { success: bool, attempt: u32 },
     ToolCall { name: String, input: String },   // ← new
     ToolResult { name: String, output: String }, // ← new
+    ToolUpdate { tool_call_id: String, delta: String }, // ← live streaming delta
 }
 
 // ============================================================================

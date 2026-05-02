@@ -189,6 +189,10 @@ fn handle_push_event(
                 thinking: String::new(),
             });
         }
+
+        PushEvent::ToolUpdate { .. } => {
+            // Live streaming delta — ignore in TUI (output already shown via ToolResult).
+        }
     }
 }
 

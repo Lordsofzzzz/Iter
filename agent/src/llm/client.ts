@@ -123,7 +123,15 @@ export class LLMClient {
           .find((m): m is AssistantMessage => m.role === 'assistant');
 
         if (lastAssistant?.stopReason === 'error') {
-          emitEvent({ type: 'error', message: `LLM error: ${lastAssistant.errorMessage ?? 'unknown'}` });
+          const msg = lastAssistant.errorMessage ?? 'unknown';
+          // Re-throw 429 so retry() can catch it and backoff.
+          // The throw must happen inside the retry() callback to be caught.
+          if (msg.includes('429')) {
+            const err = new Error(msg);
+            (err as any).statusCode = 429;
+            throw err;
+          }
+          emitEvent({ type: 'error', message: `LLM error: ${msg}` });
         }
 
         this.stats.incrementTurns();

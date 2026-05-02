@@ -166,7 +166,7 @@ readStdinLines(async (line: string) => {
       });
 
       isStreaming = true;
-      await llm.streamResponse(payload.content, currentModel);
+      await llm.streamResponse(payload.content);
       isStreaming = false;
       break;
     }

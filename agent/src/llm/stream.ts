@@ -6,6 +6,7 @@
  * AssistantMessageEvent — same event protocol as pi-ai.
  */
 
+import http from 'http';
 import type {
   AgentContext,
   AgentTool,
@@ -102,7 +103,7 @@ function extractXmlToolCalls(raw: string): {
     try {
       const parsed = JSON.parse(inner.trim());
       calls.push({
-        id:        `xml-\${Date.now()}-\${calls.length}`,
+        id:        `xml-${Date.now()}-${calls.length}`,
         name:      parsed.name ?? parsed.tool_name ?? '',
         arguments: parsed.arguments ?? parsed.params ?? {},
       });
@@ -266,6 +267,7 @@ export async function* streamOpenRouter(
   },
 ): AsyncIterable<AssistantMessageEvent> {
   const apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
+  console.error('[DEBUG] API Key present:', !!apiKey, 'Key prefix:', apiKey.substring(0, 20));
 
   const body: Record<string, unknown> = {
     model,
@@ -296,7 +298,13 @@ export async function* streamOpenRouter(
   }
 
   let response: Response;
+  console.error('[DEBUG] Starting fetch to OpenRouter');
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+    if (options.signal) {
+      options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
     response = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method:  'POST',
       headers: {
@@ -306,9 +314,11 @@ export async function* streamOpenRouter(
         'X-Title':       'Iter',
       },
       body:   JSON.stringify(body),
-      signal: options.signal,
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
   } catch (err) {
+    console.error('[DEBUG] Fetch error:', err);
     const isAbort = (err as Error)?.name === 'AbortError';
     const partial = blankPartial();
     partial.stopReason    = isAbort ? 'aborted' : 'error';
@@ -318,6 +328,7 @@ export async function* streamOpenRouter(
   }
 
   if (!response.ok) {
+    console.error('[DEBUG] Response not OK:', response.status);
     const text    = await response.text().catch(() => '');
 
     const partial = blankPartial();
@@ -327,6 +338,7 @@ export async function* streamOpenRouter(
     return;
   }
 
+  console.error('[DEBUG] Response OK, starting SSE parse');
   // ── SSE parsing state ──────────────────────────────────────────────────────
   const partial = blankPartial();
   let emittedStart = false;
@@ -373,7 +385,7 @@ export async function* streamOpenRouter(
       buf += decoder.decode(value, { stream: true });
 
       // Split on SSE line boundaries.
-      const lines = buf.split('\\n');
+      const lines = buf.split('\n');
       buf = lines.pop()!; // keep incomplete line
 
       for (const line of lines) {
@@ -390,7 +402,7 @@ export async function* streamOpenRouter(
           const rawDelta = chunk.choices?.[0]?.delta;
           if (rawDelta?.content !== undefined && rawDelta.content !== null) {
             const contentType = Array.isArray(rawDelta.content) ? 'array' : typeof rawDelta.content;
-            logToFile(`[SSE] delta.content type=\${contentType} value=\${JSON.stringify(rawDelta.content).slice(0, 120)}`);
+            logToFile(`[SSE] delta.content type=${contentType} value=${JSON.stringify(rawDelta.content).slice(0, 120)}`);
           }
         }
 
