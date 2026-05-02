@@ -1,69 +1,53 @@
 /**
- * LLM client using OpenRouter provider.
+ * LLM client — pi-style agent loop over direct OpenRouter SSE.
  *
- * Handles message history, token tracking, and streaming responses
- * from the language model.
+ * No Vercel AI SDK. Uses:
+ *   - stream.ts   → direct fetch to OpenRouter /v1/chat/completions
+ *   - agent-loop.ts → pi-identical while-loop with tool execution hooks
  */
 
-import { streamText, wrapLanguageModel, extractReasoningMiddleware } from 'ai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { emitEvent, SessionStatsData } from '../rpc.js';
-import { retry } from '../utils/retry.js';
-import { History } from './history.js';
-import { Stats } from './stats.js';
-import { tools } from '../tools/index.js';
-import { buildSystemPrompt } from '../system-prompt.js';
+import { retry }                        from '../utils/retry.js';
+import { Stats }                        from './stats.js';
+import { runAgentLoop }                 from './agent-loop.js';
+import { buildSystemPrompt }            from '../system-prompt.js';
+import { tools }                        from '../tools/index.js';
+import type { AgentLoopEvent, Message, AssistantMessage } from './types.js';
 
-// ============================================================================
-// Configuration Constants
-// ============================================================================
+// ── Config ────────────────────────────────────────────────────────────────────
 
-const openrouter = createOpenRouter({});
-
-/** Default model to use (fallback to Gemma 4B free). */
 export let MODEL_NAME = process.env.MODEL_NAME ?? 'minimax/minimax-m2.5:free';
+export const MODEL_LIMIT = 200_000;
+export const MODEL_TEMP  = 0.3;
 
-/** Override the active model at runtime. */
+let _activeModel = MODEL_NAME;
+
 export function setModel(model: string): void {
-  MODULE_NAME_OVERRIDE = model;
+  _activeModel = model;
 }
 
-// Internal mutable override (avoids re-exporting a `let` binding issues).
-let MODULE_NAME_OVERRIDE: string = MODEL_NAME;
+// ── Client ────────────────────────────────────────────────────────────────────
 
-/** Context window size in tokens. */
-export const MODEL_LIMIT = 200_000;
-
-/** Temperature for generation (0.0 = deterministic, 1.0 = creative). */
-export const MODEL_TEMP = 0.3;
-
-/** Cost per 1M tokens [input, output]. Currently free. */
-const COST_PER_MILLION: [number, number] = [0.0, 0.0];
-
-// ============================================================================
-// Client Implementation
-// ============================================================================
-
-/** LLM client managing conversation history and session stats. */
 export class LLMClient {
-  private history = new History();
-  private stats = new Stats();
+  // Plain array — no History wrapper class. Pi stores messages directly on state.messages.
+  // Using a wrapper class caused Bun runtime issues where .push() was undefined.
+  private messages: Message[] = [];
+  private readonly stats           = new Stats();
   private abortController: AbortController | null = null;
+  private cachedSystemPrompt: string | null = null;
 
-  /**
-   * Returns current session statistics.
-   */
-  getSessionStats(): ReturnType<Stats['get']> {
-    return this.stats.get();
+  private getSystemPrompt(): string {
+    if (!this.cachedSystemPrompt) {
+      this.cachedSystemPrompt = buildSystemPrompt();
+    }
+    return this.cachedSystemPrompt;
   }
 
-  /**
-   * Returns session stats formatted for TUI response.
-   */
-  getSessionStatsResponse(modelLimit: number): SessionStatsData {
-    const s = this.stats.get();
-    const used = s.tokens.input + s.tokens.output;
+  getSessionStats() { return this.stats.get(); }
 
+  getSessionStatsResponse(modelLimit: number): SessionStatsData {
+    const s    = this.stats.get();
+    const used = s.tokens.input + s.tokens.output;
     return {
       tokens: {
         input:       s.tokens.input,
@@ -82,157 +66,146 @@ export class LLMClient {
     };
   }
 
-  /**
-   * Aborts any in-progress streaming request.
-   */
   abort(): void {
     this.abortController?.abort();
     this.abortController = null;
   }
 
-  /**
-   * Clears conversation history.
-   */
   clearHistory(): void {
-    this.history.clear();
+    this.messages = [];
     this.stats.reset();
+    this.cachedSystemPrompt = null; // refresh git branch etc. on next turn
   }
 
-  /**
-   * Sends a user message and streams the assistant response.
-   *
-   * Updates history, emits text deltas, tracks tokens/cost,
-   * and handles errors gracefully.
-   */
   async streamResponse(userMessage: string, model?: string): Promise<void> {
-    if (model) MODULE_NAME_OVERRIDE = model;
-    this.history.pushUser(userMessage);
-    emitEvent({ type: 'turn_start' });
+    if (model) _activeModel = model;
 
-    let assistantText = '';
     this.abortController = new AbortController();
 
     try {
       await retry(async () => {
-        assistantText = '';  // Reset on each attempt to avoid duplication on retry.
-        
-        const model = wrapLanguageModel({
-          model: openrouter.chat(MODULE_NAME_OVERRIDE),
-          middleware: extractReasoningMiddleware({ tagName: 'thinking' }),
-        });
 
-        const isThinkingModel = MODULE_NAME_OVERRIDE.includes(':thinking') ||
-          MODULE_NAME_OVERRIDE.includes('deepseek-r') ||
-          MODULE_NAME_OVERRIDE.includes('qwq') ||
-          MODULE_NAME_OVERRIDE.includes('minimax') ||
-          MODULE_NAME_OVERRIDE.includes('r1') ||
-          MODULE_NAME_OVERRIDE.includes('reasoning');
+        // Snapshot history for this run.
+        const contextMessages = [...this.messages];
 
-        const result = await streamText({
-          model,
-          temperature: MODEL_TEMP,
-          system:      buildSystemPrompt(),
-          messages:    this.history.get(),
-          tools,
-          abortSignal: this.abortController!.signal,
-          onError:     () => {},
-          ...(isThinkingModel ? {
-            providerOptions: {
-              openrouter: { reasoning: { max_tokens: 8000 } },
-            },
-          } : {}),
-        });
+        const newMessages = await runAgentLoop(
+          userMessage,
+          {
+            systemPrompt: this.getSystemPrompt(),
+            messages:     contextMessages,
+            tools,
+          },
+          {
+            model:        _activeModel,
+            temperature:  MODEL_TEMP,
+            toolExecution: 'parallel',
+          },
+          (event: AgentLoopEvent) => this.handleLoopEvent(event),
+          this.abortController!.signal,
+        );
 
-        // Stream text and reasoning deltas to TUI.
-        for await (const chunk of result.fullStream) {
-          switch (chunk.type) {
-            case 'reasoning-delta': {
-              const delta: string = (chunk as any).textDelta ?? (chunk as any).text ?? '';
-              if (delta) emitEvent({ type: 'thinking_delta', delta });
-              break;
-            }
-            case 'text-delta': {
-              const delta: string = (chunk as any).textDelta ?? (chunk as any).text ?? '';
-              if (delta) {
-                assistantText += delta;
-                emitEvent({ type: 'text_delta', delta });
-              }
-              break;
-            }
+        // Persist all new messages — runAgentLoop always returns normally now (pi pattern).
+        for (const msg of newMessages) {
+          this.messages.push(msg);
+        }
+
+        // Sum token stats from ALL assistant messages.
+        for (const msg of newMessages) {
+          if (msg.role === 'assistant' && (msg as AssistantMessage).usage) {
+            const u = (msg as AssistantMessage).usage;
+            this.stats.addTokens(u.input, u.output, u.cacheRead, u.cacheWrite);
           }
         }
 
-        // Extract usage info (handles multiple provider formats).
-        const usage = await result.usage;
+        // Surface error/abort from stopReason — pi pattern.
+        const lastAssistant = [...newMessages]
+          .reverse()
+          .find((m): m is AssistantMessage => m.role === 'assistant');
 
-        // AI SDK v4 uses inputTokens/outputTokens; fall back to v3 names for compatibility.
-        const input  = (usage as any)?.inputTokens ?? usage?.promptTokens ?? 0;
-        const output = (usage as any)?.outputTokens ?? usage?.completionTokens ?? 0;
+        if (lastAssistant?.stopReason === 'error') {
+          emitEvent({ type: 'error', message: `LLM error: ${lastAssistant.errorMessage ?? 'unknown'}` });
+        }
 
-        const meta = usage?.providerMetadata ?? {};
-        const anthropicMeta = meta?.anthropic ?? {};
-        const openaiMeta = meta?.openai ?? {};
-
-        const cacheRead  = (anthropicMeta.cacheReadInputTokens ?? openaiMeta.cachedTokens ?? 0) as number;
-        const cacheWrite = (anthropicMeta.cacheCreationInputTokens ?? 0) as number;
-
-        // Update session stats.
-        this.stats.addTokens(input, output, cacheRead, cacheWrite);
-
-        const turnCost = ((input / 1_000_000) * COST_PER_MILLION[0])
-                      + ((output / 1_000_000) * COST_PER_MILLION[1]);
-        this.stats.addCost(turnCost);
         this.stats.incrementTurns();
 
-        // Save assistant response to history.
-        if (assistantText) {
-          this.history.pushAssistant(assistantText);
-        }
       }, this.abortController!.signal);
 
     } catch (error: unknown) {
-      // Remove user message on failure (allows retry).
-      this.history.pop();
-
-      // Handle abort separately (not an error).
-      const isAbort = error instanceof Error && error.name === 'AbortError';
+      const isAbort = (error as Error)?.name === 'AbortError';
       if (!isAbort) {
-        const message = extractErrorMessage(error);
-        emitEvent({ type: 'error', message: `LLM error: ${message}` });
+        emitEvent({ type: 'error', message: `LLM error: ${extractErrorMessage(error)}` });
       }
     } finally {
       this.abortController = null;
     }
+  }
 
-    emitEvent({ type: 'turn_end' });
-    emitEvent({ type: 'agent_end' });
+  // ── Loop event → RPC event bridge ─────────────────────────────────────────
+
+  private handleLoopEvent(event: AgentLoopEvent): void {
+    switch (event.type) {
+
+      case 'agent_start':
+        break;
+
+      case 'turn_start':
+        emitEvent({ type: 'turn_start' });
+        break;
+
+      case 'message_update':
+        // Stream text and thinking deltas.
+        if (event.event.type === 'text_delta') {
+          emitEvent({ type: 'text_delta', delta: event.event.delta });
+        } else if (event.event.type === 'thinking_delta') {
+          emitEvent({ type: 'thinking_delta', delta: event.event.delta });
+        }
+        break;
+
+      case 'tool_execution_start':
+        emitEvent({
+          type:  'tool_call',
+          name:  event.toolName,
+          input: JSON.stringify(event.args),
+        });
+        break;
+
+      case 'tool_execution_update':
+        // Live streaming delta from run_command.
+        emitEvent({
+          type:         'tool_update',
+          tool_call_id: event.toolCallId,
+          delta:        event.partialResult.content.map(c => c.text).join(''),
+        });
+        break;
+
+      case 'tool_execution_end': {
+        const output = event.result.content.map(c => c.text).join('\n');
+        emitEvent({ type: 'tool_result', name: event.toolName, output });
+        break;
+      }
+
+      case 'turn_end':
+        break;
+
+      case 'agent_end':
+        emitEvent({ type: 'turn_end' });
+        emitEvent({ type: 'agent_end' });
+        break;
+    }
   }
 }
 
-// ============================================================================
-// Private Helpers
-// ============================================================================
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Extracts a clean error message from various error formats.
- */
 function extractErrorMessage(error: unknown): string {
-  let message = error instanceof Error ? error.message : String(error);
-
-  // Try to extract inner error from JSON response.
+  let msg = (error instanceof Error) ? error.message : String(error);
   try {
-    const jsonMatch = message.match(/\{.*\}/s);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const inner = parsed?.error?.message ?? parsed?.message;
-      if (inner && typeof inner === 'string') {
-        message = inner.split('.')[0].trim();
-      }
+    const m = msg.match(/\\{.*\\}/s);
+    if (m) {
+      const p = JSON.parse(m[0]);
+      const inner = p?.error?.message ?? p?.message;
+      if (typeof inner === 'string') msg = inner.split('.')[0].trim();
     }
-  } catch {
-    // Keep original message.
-  }
-
-  // Normalize whitespace and truncate.
-  return message.replace(/\r?\n/g, ' ').slice(0, 200);
+  } catch { /* keep original */ }
+  return msg.replace(/\\r?\\n/g, ' ').slice(0, 200);
 }

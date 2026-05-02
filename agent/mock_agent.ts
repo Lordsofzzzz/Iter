@@ -6,6 +6,8 @@ function emit(payload: any) {
   process.stdout.write(JSON.stringify(payload) + '\n');
 }
 
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
 rl.on('line', (line) => {
   try {
     if (!line.trim()) return;
@@ -16,7 +18,7 @@ rl.on('line', (line) => {
   }
 });
 
-function handleCommand(cmd: any) {
+async function handleCommand(cmd: any) {
   const id = cmd.id;
   switch (cmd.type) {
     case 'get_state':
@@ -34,7 +36,23 @@ function handleCommand(cmd: any) {
       break;
     case 'prompt':
       emit({ kind: 'response', command: 'prompt', id, success: true });
-      // Logic for triggers goes here in Task 2
+      
+      const content = (cmd.content || '').toLowerCase();
+      
+      emit({ type: 'turn_start' });
+      
+      if (content.includes('error')) {
+        await sleep(200);
+        emit({ type: 'error', message: 'Simulated LLM Error' });
+      } else {
+        // Default Echo
+        await sleep(200);
+        emit({ type: 'text_delta', delta: `Mock echo: ${cmd.content}` });
+        await sleep(100);
+      }
+      
+      emit({ type: 'turn_end' });
+      emit({ type: 'agent_end' });
       break;
     default:
       emit({ kind: 'response', command: cmd.type, id, success: false, error: 'Not implemented' });

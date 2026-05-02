@@ -102,7 +102,7 @@ function extractXmlToolCalls(raw: string): {
     try {
       const parsed = JSON.parse(inner.trim());
       calls.push({
-        id:        `xml-${Date.now()}-${calls.length}`,
+        id:        `xml-\${Date.now()}-\${calls.length}`,
         name:      parsed.name ?? parsed.tool_name ?? '',
         arguments: parsed.arguments ?? parsed.params ?? {},
       });
@@ -125,10 +125,12 @@ function extractXmlToolCalls(raw: string): {
 // ── Wire format types ─────────────────────────────────────────────────────────
 
 interface ORDelta {
-  role?:             string;
-  content?:          string | null;
-  reasoning?:        string | null;
-  tool_calls?:       ORToolCallDelta[];
+  role?:              string;
+  content?:           string | null;
+  reasoning?:         string | null;
+  tool_calls?:        ORToolCallDelta[];
+  /** OpenRouter reasoning_details — present on models with native reasoning support (e.g. MiniMax). */
+  reasoning_details?: unknown[];
 }
 
 interface ORToolCallDelta {
@@ -172,8 +174,11 @@ export function toOpenRouterMessages(messages: Message[]): unknown[] {
         if (part.type === 'text') {
           parts.push({ type: 'text', text: part.text });
         } else if (part.type === 'thinking') {
-          // Send thinking as text wrapped in <thinking> tags for models that need it.
-          parts.push({ type: 'text', text: `<thinking>\n${part.thinking}\n</thinking>` });
+          // Do NOT send thinking back to the model — it poisons context.
+          // MiniMax embeds thinking in delta.reasoning, not as a user-visible message.
+          // Sending it as text causes the model to see its own internal monologue as
+          // part of the conversation and get confused / loop.
+          continue;
         } else if (part.type === 'toolCall') {
           toolCalls.push({
             id:       part.id,
@@ -190,6 +195,15 @@ export function toOpenRouterMessages(messages: Message[]): unknown[] {
           : parts;
       }
       if (toolCalls.length > 0) orMsg.tool_calls = toolCalls;
+
+      // Pass reasoning_details back unmodified — OpenRouter requires this for MiniMax
+      // to maintain reasoning context across turns. Without this, model quality degrades.
+      // See: https://openrouter.ai/docs/use-cases/reasoning-tokens#preserving-reasoning-blocks
+      const assistantMsg = msg as AssistantMessage;
+      if (assistantMsg.reasoningDetails && assistantMsg.reasoningDetails.length > 0) {
+        orMsg.reasoning_details = assistantMsg.reasoningDetails;
+      }
+
       result.push(orMsg);
       continue;
     }
@@ -321,6 +335,17 @@ export async function* streamOpenRouter(
   let textBuffer     = '';
   let thinkingBuffer = '';
 
+  // State machine for MiniMax reasoning stream:
+  // MiniMax sends tool calls after </thinking> inside delta.reasoning.
+  // thinkingClosed = true once we detect the tool-call boundary — all subsequent
+  // reasoning deltas are routed to the XML tool call parser, not the thinking block.
+  // We detect the boundary by the PRESENCE of XML tool call tags, NOT by </thinking>
+  // text (which could legitimately appear inside code examples in thinking content).
+  let thinkingClosed = false;
+  // Overflow buffer: holds reasoning text that arrived in the same chunk as the
+  // boundary marker but before we identified it.
+  let reasoningOverflow = '';
+
   // Tool call accumulators keyed by index.
   const tcAccum: Map<number, {
     id:        string;
@@ -332,6 +357,9 @@ export async function* streamOpenRouter(
 
   let finishReason: string | null = null;
   let usageFromChunk: OROUsage | null = null;
+  // Accumulate reasoning_details blocks from OpenRouter SSE.
+  // Must be passed back unmodified on next turn — OpenRouter docs explicitly require this for MiniMax.
+  const reasoningDetailsAcc: unknown[] = [];
 
   // ── Read SSE stream ────────────────────────────────────────────────────────
   const reader = response.body!.getReader();
@@ -345,7 +373,7 @@ export async function* streamOpenRouter(
       buf += decoder.decode(value, { stream: true });
 
       // Split on SSE line boundaries.
-      const lines = buf.split('\n');
+      const lines = buf.split('\\n');
       buf = lines.pop()!; // keep incomplete line
 
       for (const line of lines) {
@@ -357,16 +385,25 @@ export async function* streamOpenRouter(
         let chunk: ORChunk;
         try { chunk = JSON.parse(data); } catch { continue; }
 
-        // Log raw delta for diagnosis (remove after debugging).
-        const rawDelta = chunk.choices?.[0]?.delta;
-        if (rawDelta?.content !== undefined && rawDelta.content !== null) {
-          const contentType = Array.isArray(rawDelta.content) ? 'array' : typeof rawDelta.content;
-          logToFile(`[SSE] delta.content type=${contentType} value=${JSON.stringify(rawDelta.content).slice(0, 120)}`);
+        // Log raw delta for diagnosis (only when DEBUG_SSE=1).
+        if (process.env['DEBUG_SSE'] === '1') {
+          const rawDelta = chunk.choices?.[0]?.delta;
+          if (rawDelta?.content !== undefined && rawDelta.content !== null) {
+            const contentType = Array.isArray(rawDelta.content) ? 'array' : typeof rawDelta.content;
+            logToFile(`[SSE] delta.content type=\${contentType} value=\${JSON.stringify(rawDelta.content).slice(0, 120)}`);
+          }
         }
 
 
         // Capture usage if provided.
         if (chunk.usage) usageFromChunk = chunk.usage as OROUsage;
+
+        // Capture reasoning_details for passback (OpenRouter MiniMax requirement).
+        if (chunk.choices?.[0]?.delta?.reasoning_details) {
+          for (const rd of chunk.choices[0].delta.reasoning_details as unknown[]) {
+            reasoningDetailsAcc.push(rd);
+          }
+        }
 
         const choice = chunk.choices?.[0];
         if (!choice) continue;
@@ -382,16 +419,128 @@ export async function* streamOpenRouter(
         }
 
         // ── Reasoning / thinking delta ───────────────────────────────────
+        // MiniMax quirk: tool call XML arrives via delta.reasoning, appended
+        // AFTER </thinking> within the same reasoning stream.
+        //
+        // The WRONG approach (old): split on the text "</thinking>" — fragile
+        // because a model might write </thinking> inside a code block example
+        // in its actual thinking content.
+        //
+        // The RIGHT approach: detect tool-call XML tags as the boundary marker.
+        // Tool call XML is unambiguous — <minimax:tool_call> or <invoke name=
+        // cannot appear as legitimate thinking prose. Once we see these tags,
+        // the thinking phase is definitively over (thinkingClosed = true) and
+        // all subsequent reasoning deltas are routed through extractXmlToolCalls.
         if (delta.reasoning) {
-          if (thinkingBuffer === '') {
-            const idx = partial.content.length;
-            partial.content.push({ type: 'thinking', thinking: '' });
-            yield { type: 'thinking_start', contentIndex: idx, partial: { ...partial } };
+          const raw = reasoningOverflow + delta.reasoning;
+          reasoningOverflow = '';
+
+          // Detect the tool-call boundary by presence of XML tool call markers.
+          // We look for the earliest position of any tool-call opening tag.
+          const TOOL_MARKERS = ['<minimax:tool_call>', '<invoke name=', '<tool_call>'];
+          let boundaryIdx = -1;
+          let matchedMarker = '';
+          if (!thinkingClosed) {
+            for (const marker of TOOL_MARKERS) {
+              const idx = raw.indexOf(marker);
+              if (idx !== -1 && (boundaryIdx === -1 || idx < boundaryIdx)) {
+                boundaryIdx = idx;
+                matchedMarker = marker;
+              }
+            }
           }
-          const thinkingIdx = findLastIndex(partial.content, c => c.type === 'thinking');
-          thinkingBuffer += delta.reasoning;
-          (partial.content[thinkingIdx] as ThinkingContent).thinking = thinkingBuffer;
-          yield { type: 'thinking_delta', contentIndex: thinkingIdx, delta: delta.reasoning, partial: { ...partial } };
+
+          // Helper: emit a chunk as XML tool calls (post-boundary path).
+          // Declared as an inline async generator so yield works correctly.
+          const emitAsXml = async function*(chunk: string) {
+            const { textBefore, calls } = extractXmlToolCalls(chunk);
+            if (textBefore.trim()) {
+              const isFirstText = partial.content.filter(c => c.type === 'text').length === 0;
+              if (isFirstText) {
+                const idx = partial.content.length;
+                partial.content.push({ type: 'text', text: '' });
+                yield { type: 'text_start' as const, contentIndex: idx, partial: { ...partial } };
+              }
+              const textIdx = findLastIndex(partial.content, c => c.type === 'text');
+              textBuffer += textBefore;
+              (partial.content[textIdx] as TextContent).text = textBuffer;
+              yield { type: 'text_delta' as const, contentIndex: textIdx, delta: textBefore, partial: { ...partial } };
+            }
+            for (const xmlTc of calls) {
+              const contentIdx = partial.content.length;
+              partial.content.push({ type: 'toolCall', id: '', name: '', arguments: {} });
+              yield { type: 'toolcall_start' as const, contentIndex: contentIdx, partial: { ...partial } };
+              const toolCall: ToolCall = { type: 'toolCall', id: xmlTc.id, name: xmlTc.name, arguments: xmlTc.arguments };
+              partial.content[contentIdx] = toolCall;
+              tcAccum.set(10000 + contentIdx, { id: xmlTc.id, name: xmlTc.name, argsRaw: JSON.stringify(xmlTc.arguments), contentIdx, finalized: true });
+              yield { type: 'toolcall_end' as const, contentIndex: contentIdx, toolCall, partial: { ...partial } };
+            }
+          };
+
+          if (!thinkingClosed && boundaryIdx === -1) {
+            // Pure thinking content — no tool call markers anywhere.
+            // But guard against a partial marker split across two chunks:
+            // e.g. chunk 1 ends with "<minimax:" and chunk 2 starts with "tool_call>".
+            // We hold back the last N chars as overflow when the chunk ends with a
+            // partial match of any marker prefix.
+            let safeUpto = raw.length;
+            for (const marker of TOOL_MARKERS) {
+              // Find the longest suffix of `raw` that is a prefix of `marker`.
+              for (let len = Math.min(marker.length - 1, raw.length); len >= 1; len--) {
+                if (raw.endsWith(marker.slice(0, len))) {
+                  safeUpto = Math.min(safeUpto, raw.length - len);
+                  break;
+                }
+              }
+            }
+
+            const thinkPart = raw.slice(0, safeUpto);
+            reasoningOverflow = raw.slice(safeUpto);
+
+            if (thinkPart) {
+              if (thinkingBuffer === '') {
+                const idx = partial.content.length;
+                partial.content.push({ type: 'thinking', thinking: '' });
+                yield { type: 'thinking_start', contentIndex: idx, partial: { ...partial } };
+              }
+              const thinkingIdx = findLastIndex(partial.content, c => c.type === 'thinking');
+              thinkingBuffer += thinkPart;
+              (partial.content[thinkingIdx] as ThinkingContent).thinking = thinkingBuffer;
+              yield { type: 'thinking_delta', contentIndex: thinkingIdx, delta: thinkPart, partial: { ...partial } };
+            }
+
+          } else if (!thinkingClosed && boundaryIdx !== -1) {
+            // Boundary found in this chunk. Everything before it is thinking content,
+            // everything from the marker onwards is tool call XML.
+            thinkingClosed = true;
+
+            const thinkPart = raw.slice(0, boundaryIdx)
+              // Strip trailing </thinking> if present — it's structural, not content.
+              .replace(/<\/thinking>\s*$/, '').trimEnd();
+            const xmlPart   = raw.slice(boundaryIdx);
+
+            if (thinkPart) {
+              if (thinkingBuffer === '') {
+                const idx = partial.content.length;
+                partial.content.push({ type: 'thinking', thinking: '' });
+                yield { type: 'thinking_start', contentIndex: idx, partial: { ...partial } };
+              }
+              const thinkingIdx = findLastIndex(partial.content, c => c.type === 'thinking');
+              thinkingBuffer += thinkPart;
+              (partial.content[thinkingIdx] as ThinkingContent).thinking = thinkingBuffer;
+              yield { type: 'thinking_delta', contentIndex: thinkingIdx, delta: thinkPart, partial: { ...partial } };
+            }
+
+            if (xmlPart.trim()) {
+              yield* emitAsXml(xmlPart);
+            }
+
+          } else {
+            // thinkingClosed — all subsequent reasoning deltas are tool call XML.
+            if (raw.trim()) {
+              yield* emitAsXml(raw);
+            }
+          }
         }
 
         // ── Text delta ───────────────────────────────────────────────────
@@ -498,6 +647,11 @@ export async function* streamOpenRouter(
   // ── Stop reason ────────────────────────────────────────────────────────────
   // If XML tool calls were parsed from text, treat as toolUse even if model sent 'stop'.
   const hasXmlToolCalls = [...tcAccum.values()].some(a => a.finalized);
+
+  // Attach accumulated reasoning_details so caller can pass them back on next turn.
+  if (reasoningDetailsAcc.length > 0) {
+    partial.reasoningDetails = reasoningDetailsAcc;
+  }
 
   if (finishReason === 'tool_calls' || hasXmlToolCalls) {
     partial.stopReason = 'toolUse';

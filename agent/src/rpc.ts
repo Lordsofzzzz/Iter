@@ -7,7 +7,7 @@
  *   - Pull: TUI → Agent → TUI (request/response pattern)
  */
 
-import { logToFile } from './utils/logger';
+import { logToFile } from './utils/logger.js';
 
 // ============================================================================
 // Push Events: Agent → TUI (unprompted)
@@ -24,8 +24,9 @@ export type PushEvent =
   | { type: 'error'; message: string }
   | { type: 'cooldown'; wait_ms: number; retries_left: number }
   | { type: 'retry_result'; success: boolean; attempt: number }
-  | { type: 'tool_call';   name: string; input: string }   // ← new
-  | { type: 'tool_result'; name: string; output: string }; // ← new
+  | { type: 'tool_call';   name: string; input: string }
+  | { type: 'tool_update'; tool_call_id: string; delta: string }
+  | { type: 'tool_result'; name: string; output: string; log_path?: string };
 
 // ============================================================================
 // Pull Responses: TUI → Agent → TUI
