@@ -19,10 +19,10 @@ use crate::ui::{markdown::render_markdown, theme};
 // Constants
 // ============================================================================
 
-const TOOL_CALL_PREFIX:   &str = "  🛠  ";
-const TOOL_RESULT_PREFIX: &str = "  ✔  ";
-const SYSTEM_PREFIX:      &str = "  ⚑  ";
-const SYSTEM_INDENT:      &str = "       ";
+const TOOL_CALL_PREFIX:   &str = "  >> ";
+const TOOL_RESULT_PREFIX: &str = "  ok ";
+const SYSTEM_PREFIX:      &str = "  !! ";
+const SYSTEM_INDENT:      &str = "      ";
 
 // ============================================================================
 // Widget Definition
@@ -99,17 +99,26 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
 
     // Render thinking block first if present — no green bar, italic gray.
     if !msg.thinking.trim().is_empty() {
-        let thinking_style = Style::new()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC);
-        for raw_line in msg.thinking.lines() {
-            let t = raw_line.trim_end();
-            if !t.is_empty() {
+        out.push(Line::from(vec![
+            Span::styled("  ~ thinking", Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+        ]));
+        let max_lines = 5;
+        let inner_w = inner_w.saturating_sub(2);
+        for raw_line in msg.thinking.lines().take(max_lines) {
+            let trimmed = raw_line.trim_end();
+            if !trimmed.is_empty() {
+                let display = if trimmed.len() > inner_w { format!("{}…", &trimmed[..inner_w]) } else { trimmed.to_string() };
                 out.push(Line::from(vec![
                     Span::raw("  "),
-                    Span::styled(t.to_string(), thinking_style),
+                    Span::styled(display, Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
                 ]));
             }
+        }
+        if msg.thinking.lines().count() > max_lines {
+            out.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("…", Style::new().fg(Color::DarkGray)),
+            ]));
         }
         out.push(Line::default()); // blank separator before response
     }
@@ -127,17 +136,41 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
 // ============================================================================
 
 fn render_tool_call(content: &str, out: &mut Vec<Line>) {
+    let display = if content.len() > 200 { format!("{}...", &content[..200]) } else { content.to_string() };
     out.push(Line::from(vec![
         Span::styled(TOOL_CALL_PREFIX, theme::TOOL_CALL),
-        Span::styled(content.to_string(), theme::TOOL_CALL),
+        Span::styled(display, theme::TOOL_CALL),
     ]));
 }
 
 fn render_tool_result(content: &str, out: &mut Vec<Line>) {
-    out.push(Line::from(vec![
-        Span::styled(TOOL_RESULT_PREFIX, theme::TOOL_RESULT),
-        Span::styled(content.to_string(), theme::TOOL_RESULT),
-    ]));
+    let max_lines = 8;
+    let max_line_len = 160;
+    let lines: Vec<&str> = content.lines().take(max_lines).collect();
+    for (i, line) in lines.iter().enumerate() {
+        let display = if line.len() > max_line_len {
+            format!("{}…", &line[..max_line_len])
+        } else {
+            line.to_string()
+        };
+        if i == 0 {
+            out.push(Line::from(vec![
+                Span::styled(TOOL_RESULT_PREFIX, theme::TOOL_RESULT),
+                Span::styled(display, theme::TOOL_RESULT),
+            ]));
+        } else {
+            out.push(Line::from(vec![
+                Span::raw("       "),
+                Span::styled(display, theme::TOOL_RESULT),
+            ]));
+        }
+    }
+    if content.lines().count() > max_lines {
+        out.push(Line::from(vec![
+            Span::raw("       "),
+            Span::styled("… (truncated)", theme::DIM),
+        ]));
+    }
 }
 
 fn render_system_message(content: &str, width: usize, out: &mut Vec<Line>) {
