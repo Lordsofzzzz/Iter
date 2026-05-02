@@ -29,7 +29,7 @@ const SYSTEM_INDENT:      &str = "      ";
 // ============================================================================
 
 pub struct ChatPanel<'a> {
-    pub app: &'a App,
+    pub app: &'a mut App,
 }
 
 impl<'a> Widget for ChatPanel<'a> {
@@ -50,12 +50,17 @@ impl<'a> Widget for ChatPanel<'a> {
             render_message(msg, width, &mut lines);
         }
 
-        let total_lines = lines.len() as u16;
-        let visible     = inner.height;
+        // Use line_count() which accounts for text wrapping.
+        let para = Paragraph::new(lines.clone());
+        let total_lines = para.line_count(inner.width) as usize;
+        let visible     = inner.height as usize;
         let max_scroll  = total_lines.saturating_sub(visible);
-        let scroll      = (self.app.scroll as u16).min(max_scroll);
 
-        Paragraph::new(lines).scroll((scroll, 0)).render(inner, buf);
+        // Write back so scroll_up/down can clamp correctly.
+        self.app.scroll_max = max_scroll;
+        let scroll = (self.app.scroll.min(max_scroll)) as u16;
+
+        para.scroll((scroll, 0)).render(inner, buf);
     }
 }
 
