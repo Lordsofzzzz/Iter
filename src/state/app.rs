@@ -53,8 +53,9 @@ const MAX_SCROLL: usize = usize::MAX;
 /// Main application state, shared across all UI components.
 pub struct App {
     // ── Chat Messages ───────────────────────────────────────────────────────
-    pub messages: Vec<ChatMessage>,
-    pub scroll:   usize,
+    pub messages:   Vec<ChatMessage>,
+    pub scroll:     usize,
+    pub scroll_max: usize,  // updated by render; used to clamp scroll_up/down
 
     // ── Input State ─────────────────────────────────────────────────────────
     pub input:      String,
@@ -106,6 +107,7 @@ impl App {
         App {
             messages:   Vec::new(),
             scroll:     0,
+            scroll_max: 0,
             input:      String::new(),
             streaming:  false,
 
@@ -156,12 +158,15 @@ impl App {
 
     /// Scroll up by the standard step amount.
     pub fn scroll_up(&mut self) {
-        self.scroll = self.scroll.saturating_sub(SCROLL_STEP);
+        // Clamp first so usize::MAX (scroll_to_bottom sentinel) becomes scroll_max.
+        let clamped = self.scroll.min(self.scroll_max);
+        self.scroll = clamped.saturating_sub(SCROLL_STEP);
     }
 
     /// Scroll down by the standard step amount.
     pub fn scroll_down(&mut self) {
-        self.scroll = self.scroll.saturating_add(SCROLL_STEP);
+        let clamped = self.scroll.min(self.scroll_max);
+        self.scroll = (clamped + SCROLL_STEP).min(self.scroll_max);
     }
 
     /// Scroll to the bottom of the message list.

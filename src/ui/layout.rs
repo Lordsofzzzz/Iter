@@ -40,7 +40,7 @@ const CONTEXT_PANEL_WIDTH_PCT: u16 = 25;
 // ============================================================================
 
 /// Renders the complete UI layout.
-pub fn ui(f: &mut Frame, app: &App) {
+pub fn ui(f: &mut Frame, app: &mut App) {
     let size = f.area();
 
     // Paint entire terminal with dark background.
