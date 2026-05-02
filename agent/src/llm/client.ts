@@ -13,6 +13,7 @@ import { runAgentLoop }                 from './agent-loop.js';
 import { buildSystemPrompt }            from '../system-prompt.js';
 import { tools }                        from '../tools/index.js';
 import type { AgentLoopEvent, Message, AssistantMessage } from './types.js';
+import { transformContext } from './context.js';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -96,9 +97,10 @@ export class LLMClient {
             tools,
           },
           {
-            model:        _activeModel,
-            temperature:  MODEL_TEMP,
-            toolExecution: 'parallel',
+            model:          _activeModel,
+            temperature:    MODEL_TEMP,
+            toolExecution:  'parallel',
+            transformContext: async (msgs) => transformContext(msgs),
           },
           (event: AgentLoopEvent) => this.handleLoopEvent(event),
           this.abortController!.signal,
