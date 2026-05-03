@@ -171,9 +171,10 @@ use KeyCode::*;
                     "content": text,
                 }));
                 app.messages.push(ChatMessage {
-                    kind: MsgKind::User,
-                    content: text,
+                    kind:     MsgKind::User,
+                    content:  text,
                     thinking: String::new(),
+                    done:     true,  // user messages are always complete
                 });
                 app.input.clear();
                 app.scroll_to_bottom();

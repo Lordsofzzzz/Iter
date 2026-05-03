@@ -138,7 +138,9 @@ fn handle_push_event(
             app.scroll_to_bottom();
         }
 
-        PushEvent::TurnEnd => {}
+        PushEvent::TurnEnd => {
+            app.mark_assistant_done();
+        }
 
         PushEvent::Cooldown { wait_ms, retries_left } => {
             app.upsert_rate_limit(wait_ms, retries_left);
@@ -175,18 +177,27 @@ fn handle_push_event(
 
         PushEvent::ToolCall { name, input } => {
             app.messages.push(ChatMessage {
-                kind: MsgKind::ToolCall,
-                content: format!("▶ {name}({input})"),
+                kind:     MsgKind::ToolCall,
+                content:  format!("▶ {name}({input})"),
                 thinking: String::new(),
+                done:     false,  // not done until ToolResult arrives
             });
             app.tool_calls += 1;
         }
 
         PushEvent::ToolResult { name, output } => {
+            // Mark the most recent ToolCall for this tool as done.
+            for msg in app.messages.iter_mut().rev() {
+                if msg.kind == MsgKind::ToolCall && msg.content.contains(&format!("▶ {name}(")) {
+                    msg.done = true;
+                    break;
+                }
+            }
             app.messages.push(ChatMessage {
-                kind: MsgKind::ToolResult,
-                content: format!("◀ {name}: {output}"),
-                thinking: String::new(),
+                kind:     MsgKind::ToolResult,
+                content:  format!("{output}"),
+                thinking: name.clone(),  // store tool name in thinking field for display
+                done:     true,
             });
         }
 

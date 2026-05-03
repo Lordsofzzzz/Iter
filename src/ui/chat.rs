@@ -50,9 +50,7 @@ impl<'a> Widget for ChatPanel<'a> {
             render_message(msg, width, &mut lines);
         }
 
-        // Use line_count() which accounts for text wrapping.
-        let para = Paragraph::new(lines.clone());
-        let total_lines = para.line_count(inner.width) as usize;
+        let total_lines = lines.len();
         let visible     = inner.height as usize;
         let max_scroll  = total_lines.saturating_sub(visible);
 
@@ -60,7 +58,7 @@ impl<'a> Widget for ChatPanel<'a> {
         self.app.scroll_max = max_scroll;
         let scroll = (self.app.scroll.min(max_scroll)) as u16;
 
-        para.scroll((scroll, 0)).render(inner, buf);
+        Paragraph::new(lines).scroll((scroll, 0)).render(inner, buf);
     }
 }
 
@@ -70,12 +68,12 @@ impl<'a> Widget for ChatPanel<'a> {
 
 fn render_message(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<Line>) {
     match msg.kind {
-        MsgKind::User      => render_user_bubble(&msg.content, width, out),
-        MsgKind::Assistant => render_assistant_bubble(msg, width, out),
-        MsgKind::ToolCall  => render_tool_call(&msg.content, out),
-        MsgKind::ToolResult=> render_tool_result(&msg.content, out),
-        MsgKind::System    => render_system_message(&msg.content, width, out),
-        MsgKind::RateLimit => {},
+        MsgKind::User       => render_user_bubble(&msg.content, width, out),
+        MsgKind::Assistant  => render_assistant_bubble(msg, width, out),
+        MsgKind::ToolCall   => render_tool_call(msg, out),
+        MsgKind::ToolResult => render_tool_result(msg, out),
+        MsgKind::System     => render_system_message(&msg.content, width, out),
+        MsgKind::RateLimit  => {},
     }
 }
 
@@ -102,30 +100,46 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
     let inner_w = width.saturating_sub(3);
     out.push(Line::default());
 
-    // Render thinking block first if present — no green bar, italic gray.
+    // Render thinking block if present.
     if !msg.thinking.trim().is_empty() {
-        out.push(Line::from(vec![
-            Span::styled("  ~ thinking", Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
-        ]));
-        let max_lines = 5;
-        let inner_w = inner_w.saturating_sub(2);
-        for raw_line in msg.thinking.lines().take(max_lines) {
-            let trimmed = raw_line.trim_end();
-            if !trimmed.is_empty() {
-                let display = if trimmed.len() > inner_w { format!("{}…", &trimmed[..inner_w]) } else { trimmed.to_string() };
-                out.push(Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(display, Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
-                ]));
+        let think_style = Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+        let think_w     = inner_w.saturating_sub(4);
+
+        if msg.done {
+            // Collapsed: single preview line — pi style.
+            let preview = msg.thinking
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim();
+            let truncated = if preview.len() > think_w {
+                format!("{}…", &preview[..think_w])
+            } else {
+                preview.to_string()
+            };
+            out.push(Line::from(vec![
+                Span::styled("  ~ ", think_style),
+                Span::styled(truncated, think_style),
+            ]));
+        } else {
+            // Streaming: show last 3 wrapped lines so it scrolls as it grows.
+            let wrapped: Vec<String> = word_wrap(msg.thinking.trim(), think_w);
+            let start = wrapped.len().saturating_sub(3);
+            for (i, line) in wrapped[start..].iter().enumerate() {
+                if i == 0 {
+                    out.push(Line::from(vec![
+                        Span::styled("  ~ ", think_style),
+                        Span::styled(line.clone(), think_style),
+                    ]));
+                } else {
+                    out.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(line.clone(), think_style),
+                    ]));
+                }
             }
         }
-        if msg.thinking.lines().count() > max_lines {
-            out.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled("…", Style::new().fg(Color::DarkGray)),
-            ]));
-        }
-        out.push(Line::default()); // blank separator before response
+        out.push(Line::default());
     }
 
     // Render response content with green bar.
@@ -140,42 +154,38 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
 // Tool / system messages (no bubble)
 // ============================================================================
 
-fn render_tool_call(content: &str, out: &mut Vec<Line>) {
-    let display = if content.len() > 200 { format!("{}...", &content[..200]) } else { content.to_string() };
+fn render_tool_call(msg: &crate::state::ChatMessage, out: &mut Vec<Line>) {
+    let content = &msg.content;
+    let display = if content.len() > 200 { format!("{}...", &content[..200]) } else { content.clone() };
+    let suffix  = if msg.done { "" } else { " ⋯" };
     out.push(Line::from(vec![
         Span::styled(TOOL_CALL_PREFIX, theme::TOOL_CALL),
-        Span::styled(display, theme::TOOL_CALL),
+        Span::styled(format!("{display}{suffix}"), theme::TOOL_CALL),
     ]));
 }
 
-fn render_tool_result(content: &str, out: &mut Vec<Line>) {
-    let max_lines = 8;
-    let max_line_len = 160;
-    let lines: Vec<&str> = content.lines().take(max_lines).collect();
-    for (i, line) in lines.iter().enumerate() {
-        let display = if line.len() > max_line_len {
-            format!("{}…", &line[..max_line_len])
-        } else {
-            line.to_string()
-        };
-        if i == 0 {
-            out.push(Line::from(vec![
-                Span::styled(TOOL_RESULT_PREFIX, theme::TOOL_RESULT),
-                Span::styled(display, theme::TOOL_RESULT),
-            ]));
-        } else {
-            out.push(Line::from(vec![
-                Span::raw("       "),
-                Span::styled(display, theme::TOOL_RESULT),
-            ]));
-        }
-    }
-    if content.lines().count() > max_lines {
-        out.push(Line::from(vec![
-            Span::raw("       "),
-            Span::styled("… (truncated)", theme::DIM),
-        ]));
-    }
+fn render_tool_result(msg: &crate::state::ChatMessage, out: &mut Vec<Line>) {
+    // msg.thinking holds the tool name (set in agent.rs).
+    // msg.content holds the raw output.
+    let tool_name = &msg.thinking;
+    let content   = &msg.content;
+
+    // Collapsed: single line with tool name + first line of output.
+    let first_line = content.lines().find(|l| !l.trim().is_empty()).unwrap_or("(no output)");
+    let max_preview = 120;
+    let preview = if first_line.len() > max_preview {
+        format!("{}…", &first_line[..max_preview])
+    } else {
+        first_line.to_string()
+    };
+    let line_count = content.lines().count();
+    let suffix = if line_count > 1 { format!("  (+{} lines)", line_count - 1) } else { String::new() };
+
+    out.push(Line::from(vec![
+        Span::styled(TOOL_RESULT_PREFIX, theme::TOOL_RESULT),
+        Span::styled(format!("{tool_name}: {preview}"), theme::TOOL_RESULT),
+        Span::styled(suffix, theme::DIM),
+    ]));
 }
 
 fn render_system_message(content: &str, width: usize, out: &mut Vec<Line>) {

@@ -17,9 +17,10 @@ pub enum MsgKind {
 
 #[derive(Clone)]
 pub struct ChatMessage {
-    pub kind: MsgKind,
-    pub content: String,
+    pub kind:     MsgKind,
+    pub content:  String,
     pub thinking: String,
+    pub done:     bool,   // false = streaming, true = collapsed
 }
 
 #[derive(Clone, PartialEq)]
@@ -209,7 +210,7 @@ impl App {
                 return;
             }
         }
-        self.messages.push(ChatMessage { kind: MsgKind::Assistant, content: delta, thinking: String::new() });
+        self.messages.push(ChatMessage { kind: MsgKind::Assistant, content: delta, thinking: String::new(), done: false });
     }
 
     /// Append reasoning delta to the last assistant message's thinking field.
@@ -221,12 +222,12 @@ impl App {
             }
         }
         // No current assistant message — create one to hold the thinking.
-        self.messages.push(ChatMessage { kind: MsgKind::Assistant, content: String::new(), thinking: delta });
+        self.messages.push(ChatMessage { kind: MsgKind::Assistant, content: String::new(), thinking: delta, done: false });
     }
 
     /// Add a system message (error, warning, etc.) to the chat.
     pub fn push_system(&mut self, text: String) {
-        self.messages.push(ChatMessage { kind: MsgKind::System, content: text, thinking: String::new() });
+        self.messages.push(ChatMessage { kind: MsgKind::System, content: text, thinking: String::new(), done: true });
     }
 
     /// Update rate limit state when a 429 is received.
@@ -243,6 +244,16 @@ impl App {
         self.cooldown_deadline    = None;
         self.cooldown_started     = None;
         self.cooldown_retries_left = 0;
+    }
+
+    /// Mark the most recent assistant message as done (collapses thinking block).
+    pub fn mark_assistant_done(&mut self) {
+        for msg in self.messages.iter_mut().rev() {
+            if msg.kind == MsgKind::Assistant {
+                msg.done = true;
+                break;
+            }
+        }
     }
 
     /// Update token counts from session stats response.
