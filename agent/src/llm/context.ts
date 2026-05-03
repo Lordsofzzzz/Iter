@@ -25,6 +25,7 @@
 
 import type { Message, ToolResultMessage, AssistantMessage } from './types.js';
 import { logToFile } from '../utils/logger.js';
+import { getModelLimit } from './client.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -33,10 +34,11 @@ const CHARS_PER_TOKEN = 4;
 
 /**
  * Token threshold above which compaction fires.
- * 160k out of 200k — leaves 40k headroom for the current turn's
- * output + tool results.
+ * 80% of model context window — leaves 20% headroom for current turn output + tool results.
  */
-const COMPACT_THRESHOLD = 160_000;
+function compactThreshold(): number {
+  return Math.floor(getModelLimit() * 0.8);
+}
 
 /**
  * Number of most-recent messages to always keep verbatim after compaction.
@@ -174,7 +176,7 @@ function estimateTokens(messages: Message[]): number {
  */
 function compactIfNeeded(messages: Message[]): Message[] {
   const estimated = estimateTokens(messages);
-  if (estimated <= COMPACT_THRESHOLD) return messages;
+  if (estimated <= compactThreshold()) return messages;
 
   const cutoff = Math.max(0, messages.length - KEEP_RECENT);
   if (cutoff === 0) return messages; // everything is recent — can't compact

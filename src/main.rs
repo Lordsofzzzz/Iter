@@ -203,7 +203,16 @@ fn handle_picker_key(
     agent_stdin: &mut Option<std::process::ChildStdin>,
 ) {
     use KeyCode::*;
-    use ui::model_picker::filtered_models;
+    use ui::model_picker::{filtered_models_dynamic, MODELS};
+
+    // Use dynamic model list if available, else static fallback.
+    let static_models: Vec<(String, String)>;
+    let model_slice: &[(String, String)] = if !app.models.is_empty() {
+        &app.models
+    } else {
+        static_models = MODELS.iter().map(|(id, name)| (id.to_string(), name.to_string())).collect();
+        &static_models
+    };
 
     match (key.modifiers, key.code) {
         // Close picker.
@@ -213,7 +222,7 @@ fn handle_picker_key(
 
         // Navigate down.
         (_, Down) | (KeyModifiers::CONTROL, Char('n')) => {
-            let count = filtered_models(&app.model_picker_query).len();
+            let count = filtered_models_dynamic(&app.model_picker_query, model_slice).len();
             if count > 0 {
                 app.model_picker_selected = (app.model_picker_selected + 1).min(count - 1);
             }
@@ -229,7 +238,7 @@ fn handle_picker_key(
             app.model_picker_selected = app.model_picker_selected.saturating_sub(1);
         }
         (KeyModifiers::CONTROL, Char('j')) => {
-            let count = filtered_models(&app.model_picker_query).len();
+            let count = filtered_models_dynamic(&app.model_picker_query, model_slice).len();
             if count > 0 {
                 app.model_picker_selected = (app.model_picker_selected + 1).min(count - 1);
             }
@@ -237,15 +246,14 @@ fn handle_picker_key(
 
         // Select model.
         (_, Enter) => {
-            let matches = filtered_models(&app.model_picker_query);
+            let matches = filtered_models_dynamic(&app.model_picker_query, model_slice);
             if let Some(&model_idx) = matches.get(app.model_picker_selected) {
-                let (model_id, _) = ui::model_picker::MODELS[model_idx];
+                let (model_id, _) = &model_slice[model_idx];
                 agent::send_cmd(agent_stdin, serde_json::json!({
                     "id": "set-model",
                     "type": "set_model",
                     "model": model_id,
                 }));
-                app.model_name = model_id.to_string();
             }
             app.model_picker_open = false;
         }

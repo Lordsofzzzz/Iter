@@ -200,10 +200,12 @@ fn handle_push_event(
         PushEvent::ToolUpdate { .. } => {
             // Live streaming delta — ignore in TUI (output already shown via ToolResult).
         }
+
+        PushEvent::ModelList { models } => {
+            app.models = models.into_iter().map(|m| (m.id, m.name)).collect();
+        }
     }
 }
-
-/// Handles pull responses from the agent (replies to TUI commands).
 fn handle_pull_response(
     app:         &mut crate::state::App,
     _agent_stdin: &mut Option<std::process::ChildStdin>,
@@ -237,6 +239,13 @@ fn handle_pull_response(
                     app.context_pct = s.context_usage.percent;
                     app.cost        = s.cost;
                     app.turns       = s.turns;
+                }
+            }
+        }
+        "set_model" => {
+            if let Some(data) = resp.data {
+                if let Ok(s) = serde_json::from_value::<rpc::SetModelData>(data) {
+                    app.update_model_info(s.model_name, s.model_limit, app.model_temp);
                 }
             }
         }

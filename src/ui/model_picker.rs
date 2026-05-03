@@ -44,6 +44,23 @@ pub const MODELS: &[(&str, &str)] = &[
 // Filtering
 // ============================================================================
 
+/// Returns indices into the model list that match the query.
+/// Uses dynamic `app.models` if populated, otherwise falls back to static MODELS.
+pub fn filtered_models_dynamic<'a>(
+    query: &str,
+    models: &'a [(String, String)],
+) -> Vec<usize> {
+    let q = query.to_lowercase();
+    models
+        .iter()
+        .enumerate()
+        .filter(|(_, (id, name))| {
+            q.is_empty() || id.to_lowercase().contains(&q) || name.to_lowercase().contains(&q)
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// Returns indices into MODELS that match the query (case-insensitive substring).
 pub fn filtered_models(query: &str) -> Vec<usize> {
     let q = query.to_lowercase();
@@ -99,15 +116,24 @@ impl<'a> Widget for ModelPicker<'a> {
         input.render(layout[0], buf);
 
         // ── Model list ───────────────────────────────────────────────────
-        let matches = filtered_models(&self.app.model_picker_query);
+        // Use dynamic list from agent if available, otherwise fall back to static.
+        let dynamic: Vec<(String, String)>;
+        let model_slice: &[(String, String)] = if !self.app.models.is_empty() {
+            &self.app.models
+        } else {
+            dynamic = MODELS.iter().map(|(id, name)| (id.to_string(), name.to_string())).collect();
+            &dynamic
+        };
+
+        let matches = filtered_models_dynamic(&self.app.model_picker_query, model_slice);
         let selected_idx = self.app.model_picker_selected.min(matches.len().saturating_sub(1));
 
         let items: Vec<ListItem> = matches
             .iter()
             .enumerate()
             .map(|(pos, &model_idx)| {
-                let (id, name) = MODELS[model_idx];
-                let is_current = id == self.app.model_name.as_str();
+                let (id, name) = &model_slice[model_idx];
+                let is_current = id.as_str() == self.app.model_name.as_str();
                 let is_selected = pos == selected_idx;
 
                 let style = if is_selected {
@@ -124,7 +150,7 @@ impl<'a> Widget for ModelPicker<'a> {
                 let marker = if is_current { "✓ " } else { "  " };
                 ListItem::new(Line::from(vec![
                     Span::styled(marker, style),
-                    Span::styled(name, style),
+                    Span::styled(name.as_str(), style),
                     Span::styled(format!("  ({})", id), if is_selected {
                         style
                     } else {

@@ -26,7 +26,8 @@ export type PushEvent =
   | { type: 'retry_result'; success: boolean; attempt: number }
   | { type: 'tool_call';   name: string; input: string }
   | { type: 'tool_update'; tool_call_id: string; delta: string }
-  | { type: 'tool_result'; name: string; output: string; log_path?: string };
+  | { type: 'tool_result'; name: string; output: string; log_path?: string }
+  | { type: 'model_list'; models: Array<{ id: string; name: string }> };
 
 // ============================================================================
 // Pull Responses: TUI → Agent → TUI
@@ -39,7 +40,7 @@ export type PullResponse =
   | { kind: 'response'; command: 'prompt';            id?: string; success: true }
   | { kind: 'response'; command: 'abort';             id?: string; success: true }
   | { kind: 'response'; command: 'clear';             id?: string; success: true }
-  | { kind: 'response'; command: 'set_model';        id?: string; success: true;  data?: { model: string } }
+  | { kind: 'response'; command: 'set_model';        id?: string; success: true;  data: { model_name: string; model_limit: number } }
   | { kind: 'response'; command: string;              id?: string; success: false; error: string };
 
 // ============================================================================

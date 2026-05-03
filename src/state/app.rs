@@ -103,6 +103,9 @@ pub struct App {
 
     // ── Pending Tool Call ─────────────────────────────────────────────────
     pub pending_tool_call: Option<(String, String)>,  // (name, input_json)
+
+    // ── Dynamic Models ─────────────────────────────────────────────────
+    pub models: Vec<(String, String)>,
 }
 
 impl App {
@@ -147,6 +150,8 @@ impl App {
             streaming_started_at: None,
 
             pending_tool_call: None,
+
+            models: Vec::new(),
         }
     }
 

@@ -7,8 +7,6 @@
 
 use serde::Deserialize;
 
-use crate::state::{ChatMessage, MsgKind, ModelStatus};
-
 // ============================================================================
 // Push Events: Agent → TUI (unprompted)
 // ============================================================================
@@ -30,6 +28,14 @@ pub enum PushEvent {
     ToolCall { name: String, input: String },   // ← new
     ToolResult { name: String, output: String }, // ← new
     ToolUpdate { tool_call_id: String, delta: String }, // ← live streaming delta
+    ModelList { models: Vec<ModelEntry> },
+}
+
+/// A single model entry from the dynamic model list.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ModelEntry {
+    pub id:   String,
+    pub name: String,
 }
 
 // ============================================================================
@@ -51,6 +57,13 @@ pub struct PullResponse {
 // ============================================================================
 // Parsed Data Shapes (for pull response `data` field)
 // ============================================================================
+
+/// Data returned in a successful `set_model` response.
+#[derive(Debug, Deserialize)]
+pub struct SetModelData {
+    pub model_name:  String,
+    pub model_limit: u32,
+}
 
 /// Data for the `get_state` command response.
 #[derive(Debug, Deserialize)]

@@ -5,7 +5,7 @@
  * Communicates with the Rust TUI via JSONL over stdin/stdout.
  */
 
-import { LLMClient, MODEL_NAME, MODEL_LIMIT, clearHistory, setModel } from './llm/index.js';
+import { LLMClient, MODEL_NAME, getModelLimit, fetchModelLimits, clearHistory, setModel } from './llm/index.js';
 import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
 import { logToFile } from './utils/logger.js';
 
@@ -32,6 +32,16 @@ let currentModel = MODEL_NAME;
 // ============================================================================
 // Initialization
 // ============================================================================
+
+// Fetch context window limits from models.dev, then push model list to TUI.
+fetchModelLimits().then(models => {
+  console.error('[startup] model_list:', models.length, 'models');
+  if (models.length > 0) {
+    emitEvent({ type: 'model_list', models });
+  }
+}).catch(e => {
+  console.error('[startup] model_list fetch failed:', e);
+});
 
 // Notify TUI that agent has started.
 emitEvent({ type: 'agent_start' });
@@ -71,7 +81,7 @@ readStdinLines(async (line: string) => {
         success: true,
         data: {
           model_name:   MODEL_NAME,
-          model_limit:  MODEL_LIMIT,
+          model_limit:  getModelLimit(),
           temp:         0.3,
           is_streaming: isStreaming,
         },
@@ -79,7 +89,7 @@ readStdinLines(async (line: string) => {
       break;
 
     case 'get_session_stats': {
-      const data = llm.getSessionStatsResponse(MODEL_LIMIT);
+      const data = llm.getSessionStatsResponse(getModelLimit());
       emitResponse({
         kind: 'response',
         command: 'get_session_stats',
@@ -97,7 +107,7 @@ readStdinLines(async (line: string) => {
         break;
       }
       setModel(model);
-      emitResponse({ kind: 'response', command: 'set_model', id, success: true });
+      emitResponse({ kind: 'response', command: 'set_model', id, success: true, data: { model_name: model, model_limit: getModelLimit() } });
       break;
     }
 

@@ -5,10 +5,12 @@
 
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget,
+    },
 };
 
 use crate::state::{App, MsgKind};
@@ -43,7 +45,8 @@ impl<'a> Widget for ChatPanel<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let width = inner.width.max(1) as usize;
+        // Reserve 1 column on the right for the scrollbar.
+        let width = inner.width.saturating_sub(1).max(1) as usize;
         let mut lines: Vec<Line> = Vec::new();
 
         for msg in &self.app.messages {
@@ -58,7 +61,19 @@ impl<'a> Widget for ChatPanel<'a> {
         self.app.scroll_max = max_scroll;
         let scroll = (self.app.scroll.min(max_scroll)) as u16;
 
-        Paragraph::new(lines).scroll((scroll, 0)).render(inner, buf);
+        // Content area: all but the rightmost column.
+        let content_area = Rect {
+            width: inner.width.saturating_sub(1),
+            ..inner
+        };
+        Paragraph::new(lines).scroll((scroll, 0)).render(content_area, buf);
+
+        // Vertical scrollbar on the right edge.
+        let mut scrollbar_state = ScrollbarState::new(max_scroll)
+            .position(self.app.scroll);
+        use ratatui::widgets::StatefulWidget;
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .render(inner, buf, &mut scrollbar_state);
     }
 }
 
