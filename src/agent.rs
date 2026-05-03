@@ -176,27 +176,23 @@ fn handle_push_event(
         }
 
         PushEvent::ToolCall { name, input } => {
-            app.messages.push(ChatMessage {
-                kind:     MsgKind::ToolCall,
-                content:  format!("▶ {name}({input})"),
-                thinking: String::new(),
-                done:     false,  // not done until ToolResult arrives
-            });
+            // Don't push a separate message — ToolResult will show >> name(args) + result together.
+            // Store pending call so ToolResult can reference it.
+            app.pending_tool_call = Some((name, input));
             app.tool_calls += 1;
         }
 
         PushEvent::ToolResult { name, output } => {
-            // Mark the most recent ToolCall for this tool as done.
-            for msg in app.messages.iter_mut().rev() {
-                if msg.kind == MsgKind::ToolCall && msg.content.contains(&format!("▶ {name}(")) {
-                    msg.done = true;
-                    break;
-                }
-            }
+            // Pull the pending call args if available.
+            let args = app.pending_tool_call
+                .take()
+                .filter(|(n, _)| *n == name)
+                .map(|(_, a)| a)
+                .unwrap_or_default();
             app.messages.push(ChatMessage {
                 kind:     MsgKind::ToolResult,
-                content:  format!("{output}"),
-                thinking: name.clone(),  // store tool name in thinking field for display
+                content:  output,
+                thinking: format!("{name}({args})"),  // "tool_name(args)" for >> display
                 done:     true,
             });
         }

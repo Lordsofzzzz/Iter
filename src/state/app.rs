@@ -100,6 +100,9 @@ pub struct App {
 
     // ── Animation State ────────────────────────────────────────────────────
     pub streaming_started_at: Option<Instant>,
+
+    // ── Pending Tool Call ─────────────────────────────────────────────────
+    pub pending_tool_call: Option<(String, String)>,  // (name, input_json)
 }
 
 impl App {
@@ -142,6 +145,8 @@ impl App {
             cooldown_retries_left: 0,
 
             streaming_started_at: None,
+
+            pending_tool_call: None,
         }
     }
 

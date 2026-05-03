@@ -19,8 +19,8 @@ use crate::ui::{markdown::render_markdown, theme};
 // Constants
 // ============================================================================
 
-const TOOL_CALL_PREFIX:   &str = "  >> ";
-const TOOL_RESULT_PREFIX: &str = "  ok ";
+const TOOL_PREFIX: &str = ">> ";
+const TOOL_RESULT_PREFIX: &str = "ok ";
 const SYSTEM_PREFIX:      &str = "  !! ";
 const SYSTEM_INDENT:      &str = "      ";
 
@@ -70,8 +70,8 @@ fn render_message(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<L
     match msg.kind {
         MsgKind::User       => render_user_bubble(&msg.content, width, out),
         MsgKind::Assistant  => render_assistant_bubble(msg, width, out),
-        MsgKind::ToolCall   => render_tool_call(msg, out),
-        MsgKind::ToolResult => render_tool_result(msg, out),
+        MsgKind::ToolCall   => {}  // merged into ToolResult line
+        MsgKind::ToolResult => render_tool_result(msg, width, out),
         MsgKind::System     => render_system_message(&msg.content, width, out),
         MsgKind::RateLimit  => {},
     }
@@ -101,43 +101,33 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
     out.push(Line::default());
 
     // Render thinking block if present.
-    if !msg.thinking.trim().is_empty() {
+    // Skip if too short — avoids blank "~ " lines from tiny partial deltas.
+    let thinking_trimmed = msg.thinking.trim();
+    if thinking_trimmed.chars().count() >= 10 {
         let think_style = Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
-        let think_w     = inner_w.saturating_sub(4);
+        // Streaming: show raw thinking as single truncated line (no wrap).
+        // Done: word-wrap first so streaming blobs get correctly chunked.
+        let think_w = inner_w.saturating_sub(4);
 
         if msg.done {
-            // Collapsed: single preview line — pi style.
-            let preview = msg.thinking
-                .lines()
-                .find(|l| !l.trim().is_empty())
-                .unwrap_or("")
-                .trim();
-            let truncated = if preview.len() > think_w {
-                format!("{}…", &preview[..think_w])
-            } else {
-                preview.to_string()
-            };
+            // Collapsed: single preview line with ellipsis if needed.
+            let wrapped  = word_wrap(thinking_trimmed, think_w);
+            let preview  = wrapped.iter().find(|l| !l.trim().is_empty()).cloned().unwrap_or_default();
+            let total_chunks = wrapped.iter().filter(|l| !l.trim().is_empty()).count();
+            let ellipsis = if total_chunks > 1 { "…" } else { "" };
             out.push(Line::from(vec![
                 Span::styled("  ~ ", think_style),
-                Span::styled(truncated, think_style),
+                Span::styled(format!("{preview}{ellipsis}"), think_style),
             ]));
         } else {
-            // Streaming: show last 3 wrapped lines so it scrolls as it grows.
-            let wrapped: Vec<String> = word_wrap(msg.thinking.trim(), think_w);
-            let start = wrapped.len().saturating_sub(3);
-            for (i, line) in wrapped[start..].iter().enumerate() {
-                if i == 0 {
-                    out.push(Line::from(vec![
-                        Span::styled("  ~ ", think_style),
-                        Span::styled(line.clone(), think_style),
-                    ]));
-                } else {
-                    out.push(Line::from(vec![
-                        Span::raw("    "),
-                        Span::styled(line.clone(), think_style),
-                    ]));
-                }
-            }
+            // Streaming: single truncated line — no word-wrap while text is arriving
+            // word by word, which would split each word onto its own line.
+            let display: String = thinking_trimmed.chars().take(think_w).collect();
+            let ellipsis = if thinking_trimmed.chars().count() > think_w { "…" } else { "" };
+            out.push(Line::from(vec![
+                Span::styled("  ~ ", think_style),
+                Span::styled(format!("{display}{ellipsis}"), think_style),
+            ]));
         }
         out.push(Line::default());
     }
@@ -154,37 +144,44 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
 // Tool / system messages (no bubble)
 // ============================================================================
 
-fn render_tool_call(msg: &crate::state::ChatMessage, out: &mut Vec<Line>) {
-    let content = &msg.content;
-    let display = if content.len() > 200 { format!("{}...", &content[..200]) } else { content.clone() };
-    let suffix  = if msg.done { "" } else { " ⋯" };
-    out.push(Line::from(vec![
-        Span::styled(TOOL_CALL_PREFIX, theme::TOOL_CALL),
-        Span::styled(format!("{display}{suffix}"), theme::TOOL_CALL),
-    ]));
-}
+fn render_tool_result(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<Line>) {
+    // msg.thinking = "tool_name(args)", msg.content = raw output.
+    let call_sig   = &msg.thinking;  // e.g. "run_command({"cmd":"git status"})"
+    let content    = &msg.content;
+    let prefix_len = TOOL_PREFIX.chars().count();
 
-fn render_tool_result(msg: &crate::state::ChatMessage, out: &mut Vec<Line>) {
-    // msg.thinking holds the tool name (set in agent.rs).
-    // msg.content holds the raw output.
-    let tool_name = &msg.thinking;
-    let content   = &msg.content;
-
-    // Collapsed: single line with tool name + first line of output.
+    // First non-empty output line as result preview.
     let first_line = content.lines().find(|l| !l.trim().is_empty()).unwrap_or("(no output)");
-    let max_preview = 120;
-    let preview = if first_line.len() > max_preview {
-        format!("{}…", &first_line[..max_preview])
-    } else {
-        first_line.to_string()
-    };
-    let line_count = content.lines().count();
-    let suffix = if line_count > 1 { format!("  (+{} lines)", line_count - 1) } else { String::new() };
+    let line_count = content.lines().filter(|l| !l.trim().is_empty()).count();
+    let count_suf  = if line_count > 1 { format!("  (+{} lines)", line_count - 1) } else { String::new() };
+
+    // Line 1: >> tool_name(args)
+    let call_avail = width.saturating_sub(prefix_len);
+    let call_wrapped = word_wrap(call_sig, call_avail);
+    for (i, chunk) in call_wrapped.iter().enumerate() {
+        if i == 0 {
+            out.push(Line::from(vec![
+                Span::styled(TOOL_PREFIX, theme::TOOL_CALL),
+                Span::styled(chunk.clone(), theme::TOOL_CALL),
+            ]));
+        } else {
+            out.push(Line::from(vec![
+                Span::raw(" ".repeat(prefix_len)),
+                Span::styled(chunk.clone(), theme::TOOL_CALL),
+            ]));
+        }
+    }
+
+    // Line 2: └─ first_line  (+N lines)
+    let prefix     = "└─ ";
+    let prefix_len = prefix.chars().count();
+    let result_avail = width.saturating_sub(prefix_len + count_suf.chars().count());
+    let preview: String = first_line.chars().take(result_avail).collect();
 
     out.push(Line::from(vec![
-        Span::styled(TOOL_RESULT_PREFIX, theme::TOOL_RESULT),
-        Span::styled(format!("{tool_name}: {preview}"), theme::TOOL_RESULT),
-        Span::styled(suffix, theme::DIM),
+        Span::styled(prefix, theme::DIM),
+        Span::styled(preview, theme::TOOL_RESULT),
+        Span::styled(count_suf, theme::DIM),
     ]));
 }
 
