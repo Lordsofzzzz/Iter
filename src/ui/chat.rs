@@ -19,10 +19,10 @@ use crate::ui::{markdown::render_markdown, theme};
 // Constants
 // ============================================================================
 
-const TOOL_PREFIX: &str = ">> ";
-const TOOL_RESULT_PREFIX: &str = "ok ";
-const SYSTEM_PREFIX:      &str = "  !! ";
-const SYSTEM_INDENT:      &str = "      ";
+const TOOL_ARROW:    &str = "→ ";
+const TOOL_RESULT_PREFIX: &str = "  └─ ";
+const SYSTEM_PREFIX: &str = "  !! ";
+const SYSTEM_INDENT: &str = "      ";
 
 // ============================================================================
 // Widget Definition
@@ -110,13 +110,12 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
         let think_w = inner_w.saturating_sub(4);
 
         if msg.done {
-            // Collapsed: single preview line with ellipsis if needed.
+            // Collapsed: word-wrap and take first non-empty chunk + ellipsis.
             let wrapped  = word_wrap(thinking_trimmed, think_w);
             let preview  = wrapped.iter().find(|l| !l.trim().is_empty()).cloned().unwrap_or_default();
-            let total_chunks = wrapped.iter().filter(|l| !l.trim().is_empty()).count();
-            let ellipsis = if total_chunks > 1 { "…" } else { "" };
+            let ellipsis = if wrapped.iter().filter(|l| !l.trim().is_empty()).count() > 1 { "…" } else { "" };
             out.push(Line::from(vec![
-                Span::styled("  ~ ", think_style),
+                Span::styled("Thinking: ", Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC)),
                 Span::styled(format!("{preview}{ellipsis}"), think_style),
             ]));
         } else {
@@ -125,7 +124,7 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
             let display: String = thinking_trimmed.chars().take(think_w).collect();
             let ellipsis = if thinking_trimmed.chars().count() > think_w { "…" } else { "" };
             out.push(Line::from(vec![
-                Span::styled("  ~ ", think_style),
+                Span::styled("Thinking: ", Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC)),
                 Span::styled(format!("{display}{ellipsis}"), think_style),
             ]));
         }
@@ -145,44 +144,83 @@ fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &
 // ============================================================================
 
 fn render_tool_result(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<Line>) {
-    // msg.thinking = "tool_name(args)", msg.content = raw output.
-    let call_sig   = &msg.thinking;  // e.g. "run_command({"cmd":"git status"})"
-    let content    = &msg.content;
-    let prefix_len = TOOL_PREFIX.chars().count();
+    let call_sig = &msg.thinking;
+    let content  = &msg.content;
 
-    // First non-empty output line as result preview.
+    let human = humanize_tool_call(call_sig);
+
+    let arrow_len  = TOOL_ARROW.chars().count();
+    let call_avail = width.saturating_sub(arrow_len);
+    let call_disp: String = human.chars().take(call_avail).collect();
+    out.push(Line::from(vec![
+        Span::styled(TOOL_ARROW, theme::TOOL_CALL),
+        Span::styled(call_disp, theme::TOOL_CALL),
+    ]));
+
     let first_line = content.lines().find(|l| !l.trim().is_empty()).unwrap_or("(no output)");
     let line_count = content.lines().filter(|l| !l.trim().is_empty()).count();
-    let count_suf  = if line_count > 1 { format!("  (+{} lines)", line_count - 1) } else { String::new() };
-
-    // Line 1: >> tool_name(args)
-    let call_avail = width.saturating_sub(prefix_len);
-    let call_wrapped = word_wrap(call_sig, call_avail);
-    for (i, chunk) in call_wrapped.iter().enumerate() {
-        if i == 0 {
-            out.push(Line::from(vec![
-                Span::styled(TOOL_PREFIX, theme::TOOL_CALL),
-                Span::styled(chunk.clone(), theme::TOOL_CALL),
-            ]));
-        } else {
-            out.push(Line::from(vec![
-                Span::raw(" ".repeat(prefix_len)),
-                Span::styled(chunk.clone(), theme::TOOL_CALL),
-            ]));
-        }
-    }
-
-    // Line 2: └─ first_line  (+N lines)
-    let prefix     = "└─ ";
-    let prefix_len = prefix.chars().count();
-    let result_avail = width.saturating_sub(prefix_len + count_suf.chars().count());
-    let preview: String = first_line.chars().take(result_avail).collect();
+    let count_suf  = if line_count > 1 { format!(" (+{} lines)", line_count - 1) } else { String::new() };
+    let pfx_len    = TOOL_RESULT_PREFIX.chars().count();
+    let avail      = width.saturating_sub(pfx_len + count_suf.chars().count());
+    let preview: String = first_line.chars().take(avail).collect();
 
     out.push(Line::from(vec![
-        Span::styled(prefix, theme::DIM),
+        Span::styled(TOOL_RESULT_PREFIX, theme::DIM),
         Span::styled(preview, theme::TOOL_RESULT),
         Span::styled(count_suf, theme::DIM),
     ]));
+}
+
+fn humanize_tool_call(sig: &str) -> String {
+    let (tool, args_raw) = match sig.find('(') {
+        Some(i) => (&sig[..i], sig[i+1..].trim_end_matches(')')),
+        None    => (sig, ""),
+    };
+
+    let extract = |key: &str| -> Option<String> {
+        let needle = format!("\"{}\":", key);
+        let start  = args_raw.find(&needle)? + needle.len();
+        let rest   = args_raw[start..].trim_start();
+        if rest.starts_with('"') {
+            let inner = &rest[1..];
+            let end   = inner.find('"')?;
+            Some(inner[..end].to_string())
+        } else {
+            let end = rest.find(|c| c == ',' || c == '}').unwrap_or(rest.len());
+            Some(rest[..end].trim().to_string())
+        }
+    };
+
+    match tool {
+        "run_command" => {
+            let cmd = extract("cmd").unwrap_or_default();
+            let short: String = cmd.chars().take(60).collect();
+            let ellipsis = if cmd.chars().count() > 60 { "…" } else { "" };
+            format!("Run {short}{ellipsis}")
+        }
+        "read_file" => {
+            let path = extract("path").unwrap_or_default();
+            format!("Read {path}")
+        }
+        "write_file" => {
+            let path = extract("path").unwrap_or_default();
+            format!("Write {path}")
+        }
+        "list_files" => {
+            let path  = extract("path").unwrap_or(".".to_string());
+            let depth = extract("depth").map(|d| format!(" (depth {d})")).unwrap_or_default();
+            format!("List {path}{depth}")
+        }
+        "search_files" => {
+            let pattern = extract("pattern").unwrap_or_default();
+            let path    = extract("path").map(|p| format!(" in {p}")).unwrap_or_default();
+            format!("Search {pattern}{path}")
+        }
+        _ => {
+            let args_short: String = args_raw.chars().take(50).collect();
+            format!("{tool} {args_short}")
+        }
+    }
 }
 
 fn render_system_message(content: &str, width: usize, out: &mut Vec<Line>) {
