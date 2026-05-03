@@ -25,7 +25,9 @@ export function buildSystemPrompt(): string {
 
 Rules:
 - Use run_command for navigation and search (ls, grep, find).
-- read_file before editing — never guess file contents.
+- read_file before editing — never guess file contents. Supports offset/limit for paging.
+- Use edit for precise in-place changes (exact find-and-replace).
+- Use write_file for new files or full rewrites.
 - search_files before read_file when unsure where something is.
 - Summarize actions in plain text. Do NOT use run_command to display what you did.
 - Show file paths clearly when working with files.

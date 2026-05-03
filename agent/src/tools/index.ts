@@ -20,10 +20,11 @@ import type { AgentTool, ToolResult, ToolSchema } from '../llm/types.js';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BLOCKED_COMMANDS  = ['rm -rf /', 'mkfs', 'dd if=', ':(){:|:&};:'];
-const CMD_TIMEOUT_MS    = 30_000;
-const MAX_OUTPUT_BYTES  = 1024 * 1024;
-const MAX_FILE_BYTES    = 512  * 1024;
-const TAIL_BYTES        = 200  * 1024;
+const CMD_TIMEOUT_MS    = undefined;
+const MAX_OUTPUT_BYTES  = 50   * 1024;
+const MAX_FILE_BYTES    = 50   * 1024;
+const MAX_FILE_LINES    = 2000;
+const MAX_ENTRIES       = 500;
 
 // ── Schema helpers ────────────────────────────────────────────────────────────
 
@@ -41,22 +42,43 @@ export const tools: AgentTool[] = [
 
   {
     name: 'read_file', label: 'Read File',
-    description: 'Read a file from disk. Large files are tail-truncated.',
-    parameters: obj({ path: str('Path to file, relative to cwd') }, ['path']),
+    description: `Read a file from disk. Truncated to ${MAX_FILE_LINES} lines or ${MAX_FILE_BYTES/1024}KB (whichever first). Use offset/limit for large files.`,
+    parameters: obj({
+      path:   str('Path to file, relative to cwd'),
+      offset: { ...num('Line to start reading from (1-indexed)'), minimum: 1 },
+      limit:  { ...num('Max lines to read'), minimum: 1 },
+    }, ['path']),
     async execute(_id, args) {
       const path = args.path as string;
+      const offset = ((args.offset as number | undefined) ?? 1) - 1;
+      const userLimit = args.limit as number | undefined;
       try {
-        const buf = await readFile(path);
-        if (buf.byteLength <= MAX_FILE_BYTES) return ok(buf.toString('utf-8'));
-        const tail = buf.slice(buf.byteLength - TAIL_BYTES);
-        return ok(`[... ${buf.byteLength - TAIL_BYTES} bytes truncated ...]\n${tail.toString('utf-8')}`);
+        const text = await readFile(path, 'utf-8');
+        const lines = text.split('\n');
+        const slice = lines.slice(offset, userLimit ? offset + userLimit : undefined);
+        let out = '';
+        let bytes = 0;
+        let lineCount = 0;
+        for (const line of slice) {
+          const lineBytes = Buffer.byteLength(line + '\n');
+          if (lineCount >= MAX_FILE_LINES || bytes + lineBytes > MAX_FILE_BYTES) {
+            const remaining = lines.length - offset - lineCount;
+            const nextOffset = offset + lineCount + 1;
+            out += `\n[${remaining} more lines. Use offset=${nextOffset} to continue.]`;
+            break;
+          }
+          out += line + '\n';
+          bytes += lineBytes;
+          lineCount++;
+        }
+        return ok(out);
       } catch (e) { return err(`ERROR: ${(e as Error)?.message ?? e}`); }
     },
   },
 
   {
     name: 'write_file', label: 'Write File',
-    description: 'Write or overwrite a file. Creates parent directories if needed.',
+    description: 'Write or overwrite a file. Creates parent directories if needed. Use write_file for new files or full rewrites. Use edit for precise in-place changes.',
     parameters: obj({ path: str('Path to write'), content: str('Full file content') }, ['path', 'content']),
     async execute(_id, args) {
       try {
@@ -68,8 +90,49 @@ export const tools: AgentTool[] = [
   },
 
   {
+    name: 'edit', label: 'Edit File',
+    description:
+      'Replace an exact block of text in a file. ' +
+      'old_text must match the file content exactly (including whitespace and indentation). ' +
+      'Reads the file first if unsure of exact content. ' +
+      'Fails if old_text is not found or matches more than once.',
+    parameters: obj({
+      path:     str('Path to file, relative to cwd'),
+      old_text: str('Exact text to replace. Must match file content exactly.'),
+      new_text: str('Replacement text.'),
+    }, ['path', 'old_text', 'new_text']),
+    async execute(_id, args) {
+      const path    = args.path     as string;
+      const oldText = args.old_text as string;
+      const newText = args.new_text as string;
+
+      try {
+        const content = await readFile(path, 'utf-8');
+
+        const occurrences = content.split(oldText).length - 1;
+        if (occurrences === 0) {
+          return err(
+            `ERROR: old_text not found in ${path}.\n` +
+            `Use read_file to verify the exact content before editing.`
+          );
+        }
+        if (occurrences > 1) {
+          return err(
+            `ERROR: old_text found ${occurrences} times in ${path}. ` +
+            `Make old_text more specific so it matches exactly once.`
+          );
+        }
+
+        const updated = content.replace(oldText, newText);
+        await writeFile(path, updated, 'utf-8');
+        return ok(`OK: edited ${path}`);
+      } catch (e) { return err(`ERROR: ${(e as Error)?.message ?? e}`); }
+    },
+  },
+
+  {
     name: 'run_command', label: 'Run Command',
-    description: 'Run a shell command. Returns stdout+stderr. 30s timeout. Live output streamed. Large output truncated to log file.',
+    description: 'Run a shell command. Returns stdout+stderr. Live output streamed. Large output truncated to log file.',
     parameters: obj({ cmd: str('Shell command'), cwd: str('Working directory (default: process cwd)') }, ['cmd']),
     async execute(_id, args, signal, onUpdate) {
       const cmd = args.cmd as string;
@@ -115,12 +178,13 @@ export const tools: AgentTool[] = [
 
   {
     name: 'list_files', label: 'List Files',
-    description: 'List files in a directory recursively. Default depth 2, max 5.',
+    description: `List files in a directory recursively. Default depth 2, max 5. Truncated at ${MAX_ENTRIES} entries.`,
     parameters: obj({ path: str('Directory to list'), depth: { ...num('Max depth (default 2)'), minimum: 0, maximum: 5 } }, ['path']),
     async execute(_id, args) {
       try {
         const lines: string[] = [];
-        await walk(args.path as string, args.path as string, (args.depth as number | undefined) ?? 2, lines);
+        await walk(args.path as string, args.path as string, (args.depth as number | undefined) ?? 2, lines, MAX_ENTRIES);
+        if (lines.length >= MAX_ENTRIES) lines.push(`[Truncated at ${MAX_ENTRIES} entries]`);
         return ok(lines.join('\n') || '(empty directory)');
       } catch (e) { return err(`ERROR: ${(e as Error)?.message ?? e}`); }
     },
@@ -128,7 +192,7 @@ export const tools: AgentTool[] = [
 
   {
     name: 'search_files', label: 'Search Files',
-    description: 'Search for a text pattern using grep. Returns up to 50 matches.',
+    description: 'Search for a text pattern using grep. Truncated at 50KB.',
     parameters: obj({
       pattern: str('Pattern to search for'),
       path:    str('Directory to search (default: cwd)'),
@@ -149,7 +213,16 @@ export const tools: AgentTool[] = [
         child.stderr?.on('data', () => {});
         child.on('close', () => {
           const text = Buffer.concat(out).toString('utf-8').trim();
-          resolve(ok(text ? text.split('\n').slice(0, 50).join('\n') : '(no matches)'));
+          if (!text) return resolve(ok('(no matches)'));
+          let result = text;
+          if (Buffer.byteLength(text) > MAX_FILE_BYTES) {
+            result = Buffer.from(text).slice(0, MAX_FILE_BYTES).toString('utf-8');
+            const lastNewline = result.lastIndexOf('\n');
+            result = result.slice(0, lastNewline) + '\n[Truncated at 50KB. Refine pattern for more targeted results.]';
+          } else {
+            result = result.split('\n').slice(0, 200).join('\n');
+          }
+          resolve(ok(result));
         });
         child.on('error', () => resolve(ok('(no matches)')));
         signal?.addEventListener('abort', () => { child.kill(); resolve(err('ABORTED')); }, { once: true });
@@ -162,13 +235,14 @@ export const tools: AgentTool[] = [
 
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'target', 'dist', '.next', '.turbo']);
 
-async function walk(root: string, dir: string, depth: number, out: string[]): Promise<void> {
-  if (depth < 0) return;
+async function walk(root: string, dir: string, depth: number, out: string[], maxEntries: number): Promise<void> {
+  if (depth < 0 || out.length >= maxEntries) return;
   const entries = await readdir(dir, { withFileTypes: true });
   for (const e of entries) {
+    if (out.length >= maxEntries) break;
     if (IGNORE_DIRS.has(e.name)) continue;
     const rel = relative(root, join(dir, e.name));
     out.push(e.isDirectory() ? `${rel}/` : rel);
-    if (e.isDirectory()) await walk(root, join(dir, e.name), depth - 1, out);
+    if (e.isDirectory()) await walk(root, join(dir, e.name), depth - 1, out, maxEntries);
   }
 }

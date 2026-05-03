@@ -176,7 +176,7 @@ readStdinLines(async (line: string) => {
       });
 
       isStreaming = true;
-      await llm.streamResponse(payload.content);
+      await llm.streamResponse(payload.content, currentModel);
       isStreaming = false;
       break;
     }
@@ -228,6 +228,7 @@ function handleSlashCommand(text: string, id?: string): void {
         });
       } else {
         currentModel = FREE_MODELS[idx];
+        setModel(currentModel);
         emitEvent({
           type: 'tool_result',
           name: 'model',

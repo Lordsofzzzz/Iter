@@ -103,7 +103,13 @@ export class LLMClient {
 
   getSessionStatsResponse(modelLimit: number): SessionStatsData {
     const s    = this.stats.get();
-    const used = s.tokens.input + s.tokens.output;
+    const currentChars = this.messages.reduce((acc, msg) => {
+      if (msg.role === 'user') return acc + msg.content.length;
+      if (msg.role === 'assistant') return acc + JSON.stringify(msg.content).length;
+      if (msg.role === 'toolResult') return acc + msg.content.map(c => c.text).join('').length;
+      return acc;
+    }, 0);
+    const currentTokens = Math.ceil(currentChars / 4);
     return {
       tokens: {
         input:       s.tokens.input,
@@ -113,9 +119,9 @@ export class LLMClient {
         total:       s.tokens.total,
       },
       context_usage: {
-        tokens:  used,
+        tokens:  currentTokens,
         limit:   modelLimit,
-        percent: parseFloat(((used / modelLimit) * 100).toFixed(1)),
+        percent: parseFloat(((currentTokens / modelLimit) * 100).toFixed(1)),
       },
       cost:  s.cost,
       turns: s.turns,

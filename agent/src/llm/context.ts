@@ -52,7 +52,7 @@ const KEEP_RECENT = 20;
  * Prevents the first occurrence of a unique result from ballooning context.
  * Set to 0 to disable age-based truncation (dedup-only mode).
  */
-const OLD_RESULT_AGE  = 40;
+const OLD_RESULT_AGE  = 25;
 
 /** Max chars kept from an old (non-recent, non-duplicate) tool result. */
 const OLD_RESULT_KEEP = 300;
@@ -80,24 +80,20 @@ export function transformContext(messages: Message[]): Message[] {
  * can pair it with the following ToolResultMessage.
  */
 function deduplicateToolResults(messages: Message[]): Message[] {
-  // Build a map: fingerprint → index of the LAST tool result with that fingerprint.
-  // We iterate forward to find pairs (assistantMsg with toolCall → toolResultMsg).
   const lastIndex = new Map<string, number>();
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role !== 'toolResult') continue;
-    const fp = toolResultFingerprint(msg as ToolResultMessage);
+    const fp = toolResultFingerprint(msg as ToolResultMessage, messages, i);
     lastIndex.set(fp, i);
   }
 
-  // Second pass: tombstone everything that isn't the last occurrence.
   return messages.map((msg, i) => {
     if (msg.role !== 'toolResult') return msg;
     const r  = msg as ToolResultMessage;
-    const fp = toolResultFingerprint(r);
+    const fp = toolResultFingerprint(r, messages, i);
     if (lastIndex.get(fp) !== i) {
-      // Not the last — replace content with tombstone.
       return {
         ...r,
         content: [{ type: 'text' as const, text: `[duplicate ${r.toolName} result — kept latest only]` }],
@@ -108,12 +104,27 @@ function deduplicateToolResults(messages: Message[]): Message[] {
 }
 
 /**
- * Fingerprint = toolName + full content text.
- * Two calls to read_file("foo.ts") will produce identical content → same fp.
+ * Fingerprint = toolName + sorted JSON args.
+ * To get the args, we look backwards from the toolResult to find the
+ * assistant message that contains a toolCall with the matching toolCallId.
  */
-function toolResultFingerprint(msg: ToolResultMessage): string {
-  const content = msg.content.map(c => c.text).join('');
-  return `${msg.toolName}::${content}`;
+function toolResultFingerprint(msg: ToolResultMessage, allMessages: Message[], index: number): string {
+  const toolCallId = msg.toolCallId;
+  
+  for (let i = index - 1; i >= 0; i--) {
+    const m = allMessages[i];
+    if (m.role !== 'assistant') continue;
+    const assistant = m as AssistantMessage;
+    for (const part of assistant.content) {
+      if (part.type === 'toolCall' && part.id === toolCallId) {
+        const sortedArgs = JSON.stringify(
+          Object.fromEntries(Object.entries(part.arguments).sort(([a], [b]) => a.localeCompare(b)))
+        );
+        return `${msg.toolName}::${sortedArgs}`;
+      }
+    }
+  }
+  return `${msg.toolName}::{}`;
 }
 
 // ── Strategy 2: Truncate old unique tool results ──────────────────────────────
@@ -125,7 +136,7 @@ function toolResultFingerprint(msg: ToolResultMessage): string {
  * signal that the tool was called and what it roughly returned.
  */
 function truncateOldToolResults(messages: Message[]): Message[] {
-  if (OLD_RESULT_AGE === 0) return messages;
+  if (OLD_RESULT_AGE <= 0) return messages;
 
   return messages.map((msg, i) => {
     if (msg.role !== 'toolResult') return msg;
