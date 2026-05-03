@@ -93,50 +93,83 @@ fn render_user_bubble(content: &str, width: usize, out: &mut Vec<Line>) {
 }
 
 // ============================================================================
-// Assistant bubble — green left bar, markdown content
+// Assistant bubble — green left bar, markdown content, bubble background
 // ============================================================================
 
 fn render_assistant_bubble(msg: &crate::state::ChatMessage, width: usize, out: &mut Vec<Line>) {
-    let inner_w = width.saturating_sub(3);
+    // "│ " prefix = 2 chars; content fills the rest with bubble bg.
+    let inner_w  = width.saturating_sub(2);
+    let bubble_bg = theme::BUBBLE_BG;
+
     out.push(Line::default());
 
-    // Render thinking block if present.
-    // Skip if too short — avoids blank "~ " lines from tiny partial deltas.
+    // ── Thinking block — sits above the bubble, no bg ────────────────────────
     let thinking_trimmed = msg.thinking.trim();
     if thinking_trimmed.chars().count() >= 10 {
-        let think_style = Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
-        // Streaming: show raw thinking as single truncated line (no wrap).
-        // Done: word-wrap first so streaming blobs get correctly chunked.
-        let think_w = inner_w.saturating_sub(4);
+        let think_style  = Style::new().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+        let think_label  = Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC);
+        let think_w      = width.saturating_sub(12); // "Thinking: " = 10 chars
 
         if msg.done {
-            // Collapsed: word-wrap and take first non-empty chunk + ellipsis.
             let wrapped  = word_wrap(thinking_trimmed, think_w);
             let preview  = wrapped.iter().find(|l| !l.trim().is_empty()).cloned().unwrap_or_default();
             let ellipsis = if wrapped.iter().filter(|l| !l.trim().is_empty()).count() > 1 { "…" } else { "" };
             out.push(Line::from(vec![
-                Span::styled("Thinking: ", Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC)),
+                Span::styled("Thinking: ", think_label),
                 Span::styled(format!("{preview}{ellipsis}"), think_style),
             ]));
         } else {
-            // Streaming: single truncated line — no word-wrap while text is arriving
-            // word by word, which would split each word onto its own line.
             let display: String = thinking_trimmed.chars().take(think_w).collect();
             let ellipsis = if thinking_trimmed.chars().count() > think_w { "…" } else { "" };
             out.push(Line::from(vec![
-                Span::styled("Thinking: ", Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD).add_modifier(Modifier::ITALIC)),
+                Span::styled("Thinking: ", think_label),
                 Span::styled(format!("{display}{ellipsis}"), think_style),
             ]));
         }
         out.push(Line::default());
     }
 
-    // Render response content with green bar.
-    for line in render_markdown(&msg.content, inner_w) {
-        let mut spans: Vec<Span<'static>> = vec![Span::styled("│ ", Style::new().fg(Color::Green))];
-        spans.extend(line.spans.into_iter().map(|s| Span::styled(s.content.to_string(), s.style)));
-        out.push(Line::from(spans));
+    // ── Bubble — green left bar + elevated background ────────────────────────
+    // Skip bubble entirely if no content yet (pure thinking message).
+    if msg.content.trim().is_empty() { return; }
+
+    // Helper: pad a line's spans to fill `width` with bubble_bg.
+    // Every span needs bg set so the entire terminal line is filled.
+    let pad_line = |mut spans: Vec<Span<'static>>, used: usize| -> Line<'static> {
+        let pad = width.saturating_sub(used);
+        if pad > 0 {
+            spans.push(Span::styled(
+                " ".repeat(pad),
+                Style::new().bg(bubble_bg),
+            ));
+        }
+        Line::from(spans)
+    };
+
+    // Top padding line.
+    out.push(pad_line(vec![
+        Span::styled("│ ", theme::BUBBLE_BAR),
+    ], 2));
+
+    // Content lines.
+    let md_lines = render_markdown(&msg.content, inner_w.saturating_sub(1));
+    for md_line in md_lines {
+        // Reapply bubble_bg to every existing span.
+        let mut spans: Vec<Span<'static>> = vec![Span::styled("│ ", theme::BUBBLE_BAR)];
+        let mut used = 2usize;
+        for s in md_line.spans {
+            let text = s.content.to_string();
+            used += text.chars().count();
+            let style = s.style.bg(bubble_bg); // inject bg into existing style
+            spans.push(Span::styled(text, style));
+        }
+        out.push(pad_line(spans, used));
     }
+
+    // Bottom padding line.
+    out.push(pad_line(vec![
+        Span::styled("│ ", theme::BUBBLE_BAR),
+    ], 2));
 }
 
 // ============================================================================

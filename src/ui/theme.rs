@@ -15,6 +15,12 @@ pub const LABEL:  Style = Style::new().fg(Color::DarkGray);
 /// Near-black background — matches opencode's dark theme.
 pub const BG: Color = Color::Rgb(10, 10, 12);
 
+/// Assistant bubble background — slightly elevated from BG.
+pub const BUBBLE_BG: Color = Color::Rgb(22, 24, 30);
+
+/// Bar color for the assistant bubble left border.
+pub const BUBBLE_BAR: Style = Style::new().fg(Color::Green).bg(Color::Rgb(22, 24, 30));
+
 // ============================================================================
 // Chat Message Roles
 // ============================================================================
