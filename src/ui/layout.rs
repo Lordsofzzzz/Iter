@@ -5,7 +5,7 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -21,7 +21,7 @@ use crate::ui::theme;
 // ============================================================================
 
 /// Height of the header bar.
-const HEADER_HEIGHT: u16 = 1;
+
 
 /// Height of the animation area.
 const ANIMATION_HEIGHT: u16 = 1;
@@ -46,35 +46,15 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     // Paint entire terminal with dark background.
     f.render_widget(Block::default().style(Style::new().bg(theme::BG)), size);
 
-    // Vertical layout: header, main content, animation, input.
+    // Vertical layout: main content, animation, input.
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(HEADER_HEIGHT),
             Constraint::Min(0),
             Constraint::Length(ANIMATION_HEIGHT),
             Constraint::Length(INPUT_HEIGHT),
         ])
         .split(size);
-
-    // ── HEADER ─────────────────────────────────────────────────────────────
-    let status_style = if app.streaming { theme::STATUS_LIVE } else { theme::STATUS_IDLE };
-    let status_label = if app.streaming { "LIVE" } else { "IDLE" };
-    let ctx_color = theme::context_status_color(app.context_pct);
-
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled(" 🤖 Agent   ", theme::USER),
-        Span::styled("model: ", theme::DIM),
-        Span::styled(app.model_name.clone(), theme::ACCENT),
-        Span::styled("   ctx: ", theme::DIM),
-        Span::styled(format!("{:.1}%", app.context_pct), ctx_color),
-        Span::styled("   cost: ", theme::DIM),
-        Span::styled(format!("${:.4}", app.cost), theme::SUCCESS),
-        Span::styled("   ", theme::DIM),
-        Span::styled(format!("[{status_label}]"), status_style),
-    ]))
-    .style(Style::new().bg(theme::BG));
-    f.render_widget(header, root[0]);
 
     // ── MAIN CONTENT: Chat + Context panels ────────────────────────────────
     let cols = Layout::default()
@@ -83,7 +63,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
             Constraint::Percentage(CHAT_PANEL_WIDTH_PCT),
             Constraint::Percentage(CONTEXT_PANEL_WIDTH_PCT),
         ])
-        .split(root[1]);
+        .split(root[0]);
 
     use crate::ui::{chat::ChatPanel, context::ContextPanel, model_picker::ModelPicker};
     f.render_widget(ChatPanel { app }, cols[0]);
@@ -104,7 +84,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         let rate = Paragraph::new(Line::from(vec![
             Span::styled(rate_label, theme::WARNING),
         ]));
-        f.render_widget(rate, root[2]);
+        f.render_widget(rate, root[1]);
     } else if app.streaming {
         if let Some(elapsed_ms) = app.streaming_elapsed_ms() {
             let frame = get_breathing_frame(elapsed_ms);
@@ -112,15 +92,19 @@ pub fn ui(f: &mut Frame, app: &mut App) {
             let anim = Paragraph::new(Line::from(vec![
                 Span::styled(format!(" {} {}...", char1, status), theme::ACCENT),
             ]));
-            f.render_widget(anim, root[2]);
+            f.render_widget(anim, root[1]);
         }
     }
 
     // ── INPUT ──────────────────────────────────────────────────────────────
-    let input_widget = Paragraph::new(format!(" ❯ {}_", app.input))
-        .style(Style::new().fg(Color::White).bg(theme::BG))
-        .block(Block::default().borders(Borders::ALL).border_style(theme::ACCENT).style(Style::new().bg(theme::BG)));
-    f.render_widget(input_widget, root[3]);
+    app.textarea.set_block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::ACCENT)
+            .style(Style::new().bg(theme::BG))
+            
+    );
+    f.render_widget(&app.textarea, root[2]);
 }
 
 // ============================================================================

@@ -5,6 +5,8 @@
 
 use std::time::Instant;
 
+use tui_textarea::TextArea;
+
 #[derive(Clone, PartialEq)]
 pub enum MsgKind {
     User,
@@ -59,8 +61,8 @@ pub struct App {
     pub scroll_max: usize,  // updated by render; used to clamp scroll_up/down
 
     // ── Input State ─────────────────────────────────────────────────────────
-    pub input:      String,
-    pub streaming:  bool,
+    pub textarea:  TextArea<'static>,
+    pub streaming: bool,
 
     // ── Token Tracking ──────────────────────────────────────────────────────
     pub tok_input:       u32,
@@ -115,8 +117,13 @@ impl App {
             messages:   Vec::new(),
             scroll:     0,
             scroll_max: 0,
-            input:      String::new(),
-            streaming:  false,
+            textarea:   {
+                let mut ta = TextArea::default();
+                ta.set_cursor_line_style(ratatui::style::Style::default());
+                ta.set_cursor_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED));
+                ta
+            },
+            streaming: false,
 
             tok_input:       0,
             tok_output:      0,

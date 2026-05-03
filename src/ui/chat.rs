@@ -37,7 +37,6 @@ pub struct ChatPanel<'a> {
 impl<'a> Widget for ChatPanel<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
-            .title(" CHAT ")
             .borders(Borders::ALL)
             .border_style(theme::BORDER)
             .style(Style::new().bg(theme::BG));

@@ -41,7 +41,6 @@ pub struct ContextPanel<'a> {
 impl<'a> Widget for ContextPanel<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
-            .title(" CONTEXT ")
             .borders(Borders::ALL)
             .border_style(theme::BORDER)
             .style(ratatui::style::Style::new().bg(theme::BG));
@@ -78,7 +77,6 @@ impl<'a> ContextPanel<'a> {
 
         let gauge = Gauge::default()
             .block(Block::default()
-                .title(" Context Window ")
                 .borders(Borders::ALL)
                 .border_style(theme::BORDER))
             .gauge_style(Style::new().fg(ctx_col).bg(ratatui::style::Color::Black))
@@ -90,7 +88,6 @@ impl<'a> ContextPanel<'a> {
     /// Renders token breakdown (input, output, cache).
     fn render_token_breakdown(&self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
-            .title(" Tokens ")
             .borders(Borders::ALL)
             .border_style(theme::BORDER)
             .style(ratatui::style::Style::new().bg(theme::BG));
@@ -113,7 +110,6 @@ impl<'a> ContextPanel<'a> {
     /// Renders session statistics (turns, tools, cost).
     fn render_session_stats(&self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
-            .title(" Session ")
             .borders(Borders::ALL)
             .border_style(theme::BORDER)
             .style(ratatui::style::Style::new().bg(theme::BG));

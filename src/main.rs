@@ -20,6 +20,7 @@ use ratatui::{
     backend::CrosstermBackend,
     Terminal,
 };
+use tui_textarea::Input;
 
 use state::{App, ChatMessage, MsgKind};
 use ui::layout::ui as ui_layout;
@@ -129,22 +130,24 @@ use KeyCode::*;
 
     match (key.modifiers, key.code) {
         // Quit application.
-        (KeyModifiers::CONTROL, Char('c')) => app.should_quit = true,
+        (KeyModifiers::CONTROL, Char('c')) => {
+            app.should_quit = true;
+            return;
+        }
 
         // Open model picker.
         (KeyModifiers::CONTROL, Char('p')) => {
             app.model_picker_open     = true;
             app.model_picker_query    = String::new();
             app.model_picker_selected = 0;
+            return;
         }
-
-        // Clear input buffer.
-        (KeyModifiers::CONTROL, Char('u')) => app.input.clear(),
 
         // Clear chat history.
         (KeyModifiers::CONTROL, Char('l')) => {
             app.messages.clear();
             app.scroll = 0;
+            return;
         }
 
         // Stop/cancel current streaming operation.
@@ -153,16 +156,17 @@ use KeyCode::*;
                 app.end_streaming();
                 agent::send_abort(agent_stdin);
             }
+            return;
         }
 
-        // Insert newline in input (Alt+Enter).
-        (KeyModifiers::ALT, Enter) => {
-            app.input.push('\n');
-        }
+        // Scroll navigation.
+        (_, PageUp)  => { app.scroll_up();   return; }
+        (_, PageDown)=> { app.scroll_down();  return; }
 
-        // Send user message to agent.
-        (_, Enter) => {
-            let text = app.input.trim().to_string();
+        // Send message on plain Enter.
+        (KeyModifiers::NONE, Enter) | (KeyModifiers::NONE, Char('\n')) => {
+            let text = app.textarea.lines().join("\n");
+            let text = text.trim().to_string();
             if !text.is_empty() && !app.streaming {
                 let id = format!("prompt-{}", app.turns + 1);
                 agent::send_cmd(agent_stdin, serde_json::json!({
@@ -174,26 +178,25 @@ use KeyCode::*;
                     kind:     MsgKind::User,
                     content:  text,
                     thinking: String::new(),
-                    done:     true,  // user messages are always complete
+                    done:     true,
                 });
-                app.input.clear();
+                // Reset textarea to empty.
+                app.textarea = {
+                    let mut ta = tui_textarea::TextArea::default();
+                    ta.set_cursor_line_style(ratatui::style::Style::default());
+                    ta.set_cursor_style(ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED));
+                    ta
+                };
                 app.scroll_to_bottom();
             }
+            return;
         }
 
-        // Scroll navigation.
-        (_, PageUp)   => app.scroll_up(),
-        (_, PageDown) => app.scroll_down(),
-        (_, Up)       => app.scroll_up(),
-        (_, Down)     => app.scroll_down(),
-
-        // Text input.
-        (_, Backspace) => { app.input.pop(); }
-        (_, Char(c))   => { app.input.push(c); }
-
-        // Ignore other keys (e.g., Home, End, etc.).
         _ => {}
     }
+
+    // All other keys go to textarea (arrows, Home/End, Ctrl+W, etc.)
+    app.textarea.input(Input::from(key));
 }
 
 /// Handles keys while the model picker is open.
