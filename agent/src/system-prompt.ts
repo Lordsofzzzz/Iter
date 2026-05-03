@@ -1,27 +1,38 @@
 /**
  * Pi-style System Prompt Builder
  *
- * Minimal system prompt: one sentence role + cwd + os + git branch.
- * ~80 tokens flat, no bloat.
+ * Minimal system prompt inspired by pi coding agent.
+ * ~200 tokens. No bloat — frontier models already know how to code.
  */
 
 import { execSync } from 'child_process';
 
 /**
  * Builds the system prompt for the LLM.
- * Returns a minimal prompt with role, cwd, os, and git branch.
  */
 export function buildSystemPrompt(): string {
   const cwd = process.cwd();
   const os = process.platform;
   const git = getGitBranch();
 
-  return [
-    `You are a coding agent. Read files, write files, execute commands.`,
+  const context = [
     `cwd: ${cwd}`,
     `os: ${os}`,
     git ? `git: ${git}` : null,
   ].filter(Boolean).join('\n');
+
+  return `You are Iter, a terminal coding agent.
+
+Rules:
+- Use run_command for navigation and search (ls, grep, find).
+- read_file before editing — never guess file contents.
+- search_files before read_file when unsure where something is.
+- Summarize actions in plain text. Do NOT use run_command to display what you did.
+- Show file paths clearly when working with files.
+- Be concise. No preamble, no filler.
+- Before destructive ops (git push, delete, overwrite), confirm with the user.
+
+${context}`;
 }
 
 /**
