@@ -22,6 +22,7 @@ import type {
   Usage,
 } from './types.js';
 import { logToFile } from '../utils/logger.js';
+import { getActiveProvider, resolveApiKey, inferProvider, stripProviderPrefix } from './provider.js';
 import { getConfig } from '../config.js';
 import { streamAnthropic } from './stream-anthropic.js';
 import { streamGoogle } from './stream-google.js';
