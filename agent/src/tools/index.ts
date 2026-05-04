@@ -22,8 +22,9 @@ import type { AgentTool, ToolResult, ToolSchema } from '../llm/types.js';
 const BLOCKED_COMMANDS  = ['rm -rf /', 'mkfs', 'dd if=', ':(){:|:&};:'];
 const CMD_TIMEOUT_MS    = undefined;
 const MAX_OUTPUT_BYTES  = 50   * 1024;
-const MAX_FILE_BYTES    = 50   * 1024;
-const MAX_FILE_LINES    = 2000;
+const MAX_FILE_BYTES    = 10   * 1024;
+const MAX_FILE_LINES    = 200;
+const DEFAULT_READ_LIMIT = 200;
 const MAX_ENTRIES       = 500;
 
 // ── Schema helpers ────────────────────────────────────────────────────────────
@@ -42,29 +43,31 @@ export const tools: AgentTool[] = [
 
   {
     name: 'read_file', label: 'Read File',
-    description: `Read a file from disk. Truncated to ${MAX_FILE_LINES} lines or ${MAX_FILE_BYTES/1024}KB (whichever first). Use offset/limit for large files.`,
+    description: `Read a file. Default: first ${DEFAULT_READ_LIMIT} lines. Use offset+limit to page through large files. Prefer targeted reads over reading whole files.`,
     parameters: obj({
       path:   str('Path to file, relative to cwd'),
       offset: { ...num('Line to start reading from (1-indexed)'), minimum: 1 },
-      limit:  { ...num('Max lines to read'), minimum: 1 },
+      limit:  { ...num('Max lines to read (default: 200)') },
     }, ['path']),
     async execute(_id, args) {
       const path = args.path as string;
       const offset = ((args.offset as number | undefined) ?? 1) - 1;
-      const userLimit = args.limit as number | undefined;
+      const userLimit = (args.limit as number | undefined) ?? DEFAULT_READ_LIMIT;
       try {
         const text = await readFile(path, 'utf-8');
         const lines = text.split('\n');
-        const slice = lines.slice(offset, userLimit ? offset + userLimit : undefined);
+        const slice = lines.slice(offset, offset + userLimit);
         let out = '';
         let bytes = 0;
         let lineCount = 0;
         for (const line of slice) {
           const lineBytes = Buffer.byteLength(line + '\n');
-          if (lineCount >= MAX_FILE_LINES || bytes + lineBytes > MAX_FILE_BYTES) {
+          if (lineCount >= userLimit || bytes + lineBytes > MAX_FILE_BYTES) {
             const remaining = lines.length - offset - lineCount;
-            const nextOffset = offset + lineCount + 1;
-            out += `\n[${remaining} more lines. Use offset=${nextOffset} to continue.]`;
+            if (remaining > 0) {
+              const nextOffset = offset + lineCount + 1;
+              out += `\n[${remaining} more lines. Use offset=${nextOffset} to continue.]`;
+            }
             break;
           }
           out += line + '\n';
