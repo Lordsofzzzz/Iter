@@ -11,7 +11,7 @@
  */
 
 import { emitEvent as rpcEmitEvent } from '../rpc.js';
-import { streamOpenRouter } from './stream.js';
+import { streamLLM } from './stream.js';
 import { validateToolArguments } from '../utils/validation.js';
 import type {
   AfterToolCallResult,
@@ -165,7 +165,7 @@ async function streamAssistantResponse(
     ? await config.transformContext([...ctx.messages], signal)
     : ctx.messages;
 
-  const events = streamOpenRouter(config.model, { ...ctx, messages }, {
+  const events = streamLLM(config.model, { ...ctx, messages }, {
     temperature: config.temperature,
     signal,
   });

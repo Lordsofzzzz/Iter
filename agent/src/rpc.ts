@@ -27,7 +27,8 @@ export type PushEvent =
   | { type: 'tool_call';   name: string; input: string }
   | { type: 'tool_update'; tool_call_id: string; delta: string }
   | { type: 'tool_result'; name: string; output: string; log_path?: string }
-  | { type: 'model_list'; models: Array<{ id: string; name: string }> };
+  | { type: 'model_list'; models: Array<{ id: string; name: string }> }
+  | { type: 'provider_changed'; provider_id: string; provider_name: string };
 
 // ============================================================================
 // Pull Responses: TUI → Agent → TUI

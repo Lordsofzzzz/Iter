@@ -12,7 +12,7 @@ use std::{io, time::Duration};
 use std::sync::mpsc::{self, Receiver};
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -100,10 +100,16 @@ fn run(
             }
         }
 
-        // Poll for keyboard input with timeout.
+        // Poll for keyboard/mouse input with timeout.
         if event::poll(Duration::from_millis(POLL_INTERVAL_MS))? {
-            if let Event::Key(key) = event::read()? {
-                handle_key_input(key, app, agent_stdin);
+            match event::read()? {
+                Event::Key(key) => handle_key_input(key, app, agent_stdin),
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp   => app.scroll_up(),
+                    MouseEventKind::ScrollDown => app.scroll_down(),
+                    _ => {}
+                },
+                _ => {}
             }
         }
 
@@ -160,8 +166,8 @@ use KeyCode::*;
         }
 
         // Scroll navigation.
-        (_, PageUp)  => { app.scroll_up();   return; }
-        (_, PageDown)=> { app.scroll_down();  return; }
+        (_, PageUp) | (KeyModifiers::ALT, Up)   => { app.scroll_up();   return; }
+        (_, PageDown) | (KeyModifiers::ALT, Down) => { app.scroll_down();  return; }
 
         // Send message on plain Enter.
         (KeyModifiers::NONE, Enter) | (KeyModifiers::NONE, Char('\n')) => {

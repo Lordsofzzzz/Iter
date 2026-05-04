@@ -1,12 +1,14 @@
 /**
- * OpenRouter streaming layer.
+ * LLM streaming layer — multi-provider router.
  *
- * Talks directly to OpenRouter's /api/v1/chat/completions endpoint
- * using SSE. No Vercel AI SDK. Returns an async iterable of
- * AssistantMessageEvent — same event protocol as pi-ai.
+ * `streamLLM` is the single entry point. It reads the active provider config
+ * and dispatches to the appropriate API-specific streamer:
+ *
+ *   openai-completions    → streamOpenRouter (handles OpenRouter, OpenAI, DeepSeek, Groq, Mistral…)
+ *   anthropic-messages    → streamAnthropic  (native Anthropic Messages API)
+ *   google-generative-ai  → streamGoogle     (Google Gemini API)
  */
 
-import http from 'http';
 import type {
   AgentContext,
   AgentTool,
@@ -20,10 +22,63 @@ import type {
   Usage,
 } from './types.js';
 import { logToFile } from '../utils/logger.js';
+import { getActiveProvider, resolveApiKey, inferProvider, stripProviderPrefix } from './provider.js';
+import { streamAnthropic } from './stream-anthropic.js';
+import { streamGoogle } from './stream-google.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+
+// ── Provider-aware dispatch ───────────────────────────────────────────────────
+
+/**
+ * Stream an LLM response using the configured provider.
+ * This is the single call site used by agent-loop.ts.
+ */
+export async function* streamLLM(
+  model: string,
+  context: AgentContext,
+  options: {
+    temperature: number;
+    signal?: AbortSignal;
+  },
+): AsyncIterable<AssistantMessageEvent> {
+  const provider = inferProvider(model);
+  const apiKey = resolveApiKey(provider);
+
+  console.error(`[stream] provider=${provider.id} api=${provider.apiType} model=${model}`);
+
+  switch (provider.apiType) {
+    case 'anthropic-messages':
+      yield* streamAnthropic(stripProviderPrefix(model), context, {
+        temperature: options.temperature,
+        baseUrl: provider.baseUrl,
+        apiKey,
+        signal: options.signal,
+      });
+      return;
+
+    case 'google-generative-ai':
+      yield* streamGoogle(stripProviderPrefix(model), context, {
+        temperature: options.temperature,
+        baseUrl: provider.baseUrl,
+        apiKey,
+        signal: options.signal,
+      });
+      return;
+
+    case 'openai-completions':
+    default:
+      yield* streamOpenRouter(model, context, {
+        temperature: options.temperature,
+        apiKey,
+        signal: options.signal,
+        baseUrl: provider.baseUrl,
+      });
+      return;
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -258,15 +313,17 @@ function blankPartial(): AssistantMessage {
  * to pi-ai's streamSimple. The caller (agent loop) iterates these events.
  */
 export async function* streamOpenRouter(
-  model:   string,
+  model: string,
   context: AgentContext,
   options: {
     temperature: number;
-    apiKey?:     string;
-    signal?:     AbortSignal;
+    apiKey?: string;
+    signal?: AbortSignal;
+    baseUrl?: string;
   },
 ): AsyncIterable<AssistantMessageEvent> {
   const apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
+  const baseUrl = options.baseUrl ?? OPENROUTER_BASE;
   console.error('[DEBUG] API Key present:', !!apiKey, 'Key prefix:', apiKey.substring(0, 20));
 
   const body: Record<string, unknown> = {
@@ -305,7 +362,7 @@ export async function* streamOpenRouter(
     if (options.signal) {
       options.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }
-    response = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+    response = await fetch(`${baseUrl}/chat/completions`, {
       method:  'POST',
       headers: {
         'Content-Type':  'application/json',
