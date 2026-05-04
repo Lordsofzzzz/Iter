@@ -3,17 +3,25 @@
  *
  * Handles rate limiting (429) with automatic retry,
  * emits cooldown events to TUI, and properly handles abort signals.
+ * 
+ * Configuration is loaded from config.ts (environment variables + config file).
  */
 
-import { logToFile } from "./logger";
+import { logToFile } from "./logger.js";
 import { emitEvent } from "../rpc.js";
+import { getRetryConfig, isRetryEnabled } from "../config.js";
 
 // ============================================================================
-// Configuration
+// Configuration (loaded from config.ts)
 // ============================================================================
 
-export const DEFAULT_RETRIES = 5;
-const INITIAL_DELAY_MS = 2000;
+const getDefaults = () => {
+  const cfg = getRetryConfig();
+  return {
+    retries: cfg.enabled ? cfg.maxRetries : 0,
+    delay: cfg.baseDelayMs,
+  };
+};
 
 // ============================================================================
 // Public API
@@ -31,10 +39,20 @@ const INITIAL_DELAY_MS = 2000;
 export async function retry<T>(
   fn: () => Promise<T>,
   signal: AbortSignal,
-  retries = DEFAULT_RETRIES,
-  delay = INITIAL_DELAY_MS,
+  retries?: number,
+  delay?: number,
   attempt = 1,
 ): Promise<T> {
+  // Get defaults from config
+  const defaults = getDefaults();
+  const maxRetries = retries ?? defaults.retries;
+  const initialDelay = delay ?? defaults.delay;
+  
+  // Check if retry is disabled in config
+  if (!isRetryEnabled()) {
+    throw await fn(); // Will throw the error directly
+  }
+  
   try {
     const result = await fn();
 
@@ -56,7 +74,7 @@ export async function retry<T>(
     const isRetryable = isRetryableError(err);
 
     // If not retryable, or retries exhausted — fail.
-    if (!isRetryable || retries === 0) {
+    if (!isRetryable || maxRetries === 0) {
       if (attempt > 1) {
         emitEvent({ type: 'retry_result', success: false, attempt });
       }
@@ -65,11 +83,11 @@ export async function retry<T>(
     }
 
     // Retryable error — emit cooldown event and retry.
-    logToFile(`Retrying in ${delay}ms (${retries} left)`);
-    emitEvent({ type: 'cooldown', wait_ms: delay, retries_left: retries });
+    logToFile(`Retrying in ${initialDelay}ms (${maxRetries} left)`);
+    emitEvent({ type: 'cooldown', wait_ms: initialDelay, retries_left: maxRetries });
 
     try {
-      await abortableSleep(delay, signal);
+      await abortableSleep(initialDelay, signal);
     } catch {
       // Aborted during cooldown.
       throw new DOMException("Aborted", "AbortError");
@@ -77,7 +95,7 @@ export async function retry<T>(
 
     // Emit turn start and recurse with exponential backoff.
     emitEvent({ type: 'turn_start' });
-    return retry(fn, signal, retries - 1, delay * 2, attempt + 1);
+    return retry(fn, signal, maxRetries - 1, initialDelay * 2, attempt + 1);
   }
 }
 
@@ -108,7 +126,7 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
  * Determines if an error is a rate limit (429) or retryable server error.
  * Mirrors pi-mono's comprehensive retry detection pattern.
  */
-function isRetryableError(err: unknown): boolean {
+export function isRetryableError(err: unknown): boolean {
   const error = err as Record<string, unknown>;
   
   // Check for explicit 429 status code

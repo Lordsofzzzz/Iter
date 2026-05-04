@@ -22,7 +22,7 @@ import type {
   Usage,
 } from './types.js';
 import { logToFile } from '../utils/logger.js';
-import { getActiveProvider, resolveApiKey, inferProvider, stripProviderPrefix } from './provider.js';
+import { getConfig } from '../config.js';
 import { streamAnthropic } from './stream-anthropic.js';
 import { streamGoogle } from './stream-google.js';
 
@@ -358,7 +358,8 @@ export async function* streamOpenRouter(
   console.error('[DEBUG] Starting fetch to OpenRouter');
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    const timeoutMs = getConfig().timeoutMs;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     if (options.signal) {
       options.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }

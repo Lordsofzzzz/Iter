@@ -7,8 +7,8 @@
  */
 
 import { emitEvent, SessionStatsData } from '../rpc.js';
-import { retry, DEFAULT_RETRIES }         from '../utils/retry.js';
-import { Stats }                        from './stats.js';
+import { retry, isRetryEnabled, getRetryConfig } from '../config.js';
+import { Stats } from './stats.js';
 import { runAgentLoop }                 from './agent-loop.js';
 import { buildSystemPrompt }            from '../system-prompt.js';
 import { tools }                        from '../tools/index.js';
@@ -93,7 +93,7 @@ export class LLMClient {
   private cachedSystemPrompt: string | null = null;
   // Retry counter that resets after each successful LLM call (pi-mono pattern)
   private retryCount = 0;
-  private maxRetries = DEFAULT_RETRIES;
+  private get maxRetries() { return getRetryConfig().maxRetries; }
 
   private getSystemPrompt(): string {
     if (!this.cachedSystemPrompt) {
