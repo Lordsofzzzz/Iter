@@ -197,26 +197,76 @@ function isOpenAIRetryable(status: number, errorType: string | undefined, errorC
 
 /**
  * Generic check if an error is retryable.
- * Used when provider-specific parsing isn't available.
+ * Matches pi-mono patterns from agent-session.ts _isRetryableError().
  */
 export function isGenericRetryable(status: number, message: string): boolean {
   // Explicit status codes
-  if (status === 429) return true;
-  if (status >= 500 && status < 600) return true;
-  
-  // Check message patterns
+  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+
+  // Match pi-mono patterns (overloaded, rate limit, network/connection errors, etc.)
   const msg = message.toLowerCase();
   const patterns = [
-    'rate limit',
-    'rate_limit',
-    'too many requests',
     'overloaded',
-    'server error',
+    'provider returned error',
+    'rate limit',
+    'too many requests',
+    '429',
+    '500',
+    '502',
+    '503',
+    '504',
     'service unavailable',
+    'server error',
     'internal error',
-    'temporarily unavailable',
-    'try again',
+    'network error',
+    'connection error',
+    'connection refused',
+    'connection lost',
+    'websocket closed',
+    'websocket error',
+    'other side closed',
+    'fetch failed',
+    'upstream connect',
+    'reset before headers',
+    'socket hang up',
+    'ended without',
+    'http2 request did not get a response',
+    'timed out',
+    'timeout',
+    'terminated',
+    'retry delay',
   ];
-  
+
+  return patterns.some(p => msg.includes(p));
+}
+
+// ============================================================================
+// Context overflow detection (NOT retryable)
+// ============================================================================
+
+/**
+ * Check if error is a context overflow error.
+ * Context overflow is handled by compaction, NOT retry.
+ * Matches pi-mono's isContextOverflow() logic.
+ */
+export function isContextOverflow(message: string, contextWindow: number): boolean {
+  const msg = message.toLowerCase();
+  const patterns = [
+    'context length',
+    'context window',
+    'max tokens',
+    'too many tokens',
+    'exceeds context',
+    'context limit',
+    'token limit',
+    'token limit exceeded',
+    'input too long',
+    'request too long',
+    'maximum context',
+    'context overflow',
+  ];
+
   return patterns.some(p => msg.includes(p));
 }

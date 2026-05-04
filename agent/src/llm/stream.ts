@@ -24,6 +24,7 @@ import type {
 import { logToFile } from '../utils/logger.js';
 import { getActiveProvider, resolveApiKey, inferProvider, stripProviderPrefix } from './provider.js';
 import { getConfig } from '../config.js';
+import { parseProviderError, isGenericRetryable } from './provider-error.js';
 import { streamAnthropic } from './stream-anthropic.js';
 import { streamGoogle } from './stream-google.js';
 
@@ -321,10 +322,12 @@ export async function* streamOpenRouter(
     apiKey?: string;
     signal?: AbortSignal;
     baseUrl?: string;
+    apiType?: 'openai-completions';
   },
 ): AsyncIterable<AssistantMessageEvent> {
   const apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
   const baseUrl = options.baseUrl ?? OPENROUTER_BASE;
+  const apiType = options.apiType ?? 'openai-completions';
   console.error('[DEBUG] API Key present:', !!apiKey, 'Key prefix:', apiKey.substring(0, 20));
 
   const body: Record<string, unknown> = {
@@ -386,13 +389,14 @@ export async function* streamOpenRouter(
     return;
   }
 
-  if (!response.ok) {
+if (!response.ok) {
     console.error('[DEBUG] Response not OK:', response.status);
-    const text    = await response.text().catch(() => '');
+    const text = await response.text().catch(() => '');
 
+    const providerErr = parseProviderError(response, text, apiType);
     const partial = blankPartial();
-    partial.stopReason   = 'error';
-    partial.errorMessage = `HTTP ${response.status}: ${text.slice(0, 200)}`;
+    partial.stopReason = 'error';
+    partial.errorMessage = providerErr.message;
     yield { type: 'error', reason: 'error', error: partial };
     return;
   }

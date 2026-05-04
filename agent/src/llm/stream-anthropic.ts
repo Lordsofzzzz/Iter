@@ -16,6 +16,7 @@ import type {
   ToolCall,
   Usage,
 } from './types.js';
+import { parseProviderError } from './provider-error.js';
 
 interface AnthropicTool {
   name: string;
@@ -144,11 +145,12 @@ export async function* streamAnthropic(
     return;
   }
 
-  if (!response.ok) {
+if (!response.ok) {
     const text = await response.text().catch(() => '');
+    const providerErr = parseProviderError(response, text, 'anthropic-messages');
     const p = blankPartial();
     p.stopReason = 'error';
-    p.errorMessage = `HTTP ${response.status}: ${text.slice(0, 300)}`;
+    p.errorMessage = providerErr.message;
     yield { type: 'error', reason: 'error', error: p };
     return;
   }
