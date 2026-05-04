@@ -52,11 +52,11 @@ export async function retry<T>(
       throw err;
     }
 
-    // Check if this is a rate limit (429) error.
-    const is429 = isRateLimitError(err);
+    // Check if this is a retryable error (rate limit or server error).
+    const isRetryable = isRetryableError(err);
 
-    // If not a 429, or retries exhausted — fail.
-    if (!is429 || retries === 0) {
+    // If not retryable, or retries exhausted — fail.
+    if (!isRetryable || retries === 0) {
       if (attempt > 1) {
         emitEvent({ type: 'retry_result', success: false, attempt });
       }
@@ -64,7 +64,7 @@ export async function retry<T>(
       throw err;
     }
 
-    // Rate limited — emit cooldown event and retry.
+    // Retryable error — emit cooldown event and retry.
     logToFile(`Retrying in ${delay}ms (${retries} left)`);
     emitEvent({ type: 'cooldown', wait_ms: delay, retries_left: retries });
 
@@ -105,13 +105,48 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Determines if an error is a rate limit (429) from various sources.
+ * Determines if an error is a rate limit (429) or retryable server error.
+ * Mirrors pi-mono's comprehensive retry detection pattern.
  */
-function isRateLimitError(err: unknown): boolean {
+function isRetryableError(err: unknown): boolean {
   const error = err as Record<string, unknown>;
-  return (
-    error.statusCode === 429 ||
-    error.code === 429 ||
-    (typeof error.message === 'string' && error.message.includes('rate'))
-  );
+  
+  // Check for explicit 429 status code
+  if (error.statusCode === 429 || error.code === 429) {
+    return true;
+  }
+
+  // Extract error message for pattern matching
+  const msg = (error.message ?? error.error ?? String(err)).toString().toLowerCase();
+  
+  // pi-mono's comprehensive patterns
+  const retryablePatterns = [
+    /rate\s?limit/i,
+    /rate\s?increased/i,
+    /too\s?many\s?requests/i,
+    /overloaded/i,
+    /provider\s?returned\s?error/i,
+    /429/i,
+    /500/i,
+    /502/i,
+    /503/i,
+    /504/i,
+    /service\s?unavailable/i,
+    /server\s?error/i,
+    /internal\s?error/i,
+    /network\s?error/i,
+    /connection\s?error/i,
+    /connection\s?refused/i,
+    /temporarily\s?unavailable/i,
+    /upstream\s?error/i,
+    /bad\s?gateway/i,
+    /gateway\s?timeout/i,
+  ];
+
+  return retryablePatterns.some(pattern => pattern.test(msg));
+}
+
+// Legacy alias for backward compatibility
+function isRateLimitError(err: unknown): boolean {
+  return isRetryableError(err);
 }
