@@ -7,7 +7,7 @@
  */
 
 import { emitEvent, SessionStatsData } from '../rpc.js';
-import { retry }                        from '../utils/retry.js';
+import { retry, DEFAULT_RETRIES }         from '../utils/retry.js';
 import { Stats }                        from './stats.js';
 import { runAgentLoop }                 from './agent-loop.js';
 import { buildSystemPrompt }            from '../system-prompt.js';
@@ -91,6 +91,9 @@ export class LLMClient {
   private readonly stats           = new Stats();
   private abortController: AbortController | null = null;
   private cachedSystemPrompt: string | null = null;
+  // Retry counter that resets after each successful LLM call (pi-mono pattern)
+  private retryCount = 0;
+  private maxRetries = DEFAULT_RETRIES;
 
   private getSystemPrompt(): string {
     if (!this.cachedSystemPrompt) {
@@ -146,7 +149,6 @@ export class LLMClient {
 
     try {
       await retry(async () => {
-
         // Snapshot history for this run.
         const contextMessages = [...this.messages];
 
@@ -180,26 +182,28 @@ export class LLMClient {
           }
         }
 
-        // Surface error/abort from stopReason — pi pattern.
+        // Check for retryable errors — re-throw to trigger retry with backoff.
         const lastAssistant = [...newMessages]
           .reverse()
           .find((m): m is AssistantMessage => m.role === 'assistant');
 
         if (lastAssistant?.stopReason === 'error') {
           const msg = lastAssistant.errorMessage ?? 'unknown';
-          // Re-throw 429 so retry() can catch it and backoff.
-          // The throw must happen inside the retry() callback to be caught.
-          if (msg.includes('429')) {
+          // Check if retryable (429 or server error) — re-throw to trigger backoff.
+          if (msg.includes('429') || /5\d{2}/.test(msg) || /server\s*error/i.test(msg)) {
+            this.retryCount++;
             const err = new Error(msg);
-            (err as any).statusCode = 429;
+            (err as any).statusCode = msg.includes('429') ? 429 : 500;
             throw err;
           }
           emitEvent({ type: 'error', message: `LLM error: ${msg}` });
         }
 
+        // Reset retry counter on successful response (pi-mono pattern)
+        this.retryCount = 0;
         this.stats.incrementTurns();
 
-      }, this.abortController!.signal);
+      }, this.abortController!.signal, this.maxRetries - this.retryCount);
 
     } catch (error: unknown) {
       const isAbort = (error as Error)?.name === 'AbortError';

@@ -12,7 +12,7 @@ import { emitEvent } from "../rpc.js";
 // Configuration
 // ============================================================================
 
-const DEFAULT_RETRIES = 5;
+export const DEFAULT_RETRIES = 5;
 const INITIAL_DELAY_MS = 2000;
 
 // ============================================================================
