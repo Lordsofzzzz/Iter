@@ -21,11 +21,23 @@ import type { AgentTool, ToolResult, ToolSchema } from '../llm/types.js';
 
 const BLOCKED_COMMANDS  = ['rm -rf /', 'mkfs', 'dd if=', ':(){:|:&};:'];
 const CMD_TIMEOUT_MS    = undefined;
-const MAX_OUTPUT_BYTES  = 50   * 1024;
-const MAX_FILE_BYTES    = 10   * 1024;
+
+// read_file limits
+const MAX_FILE_BYTES    = 10 * 1024;
 const MAX_FILE_LINES    = 200;
 const DEFAULT_READ_LIMIT = 200;
-const MAX_ENTRIES       = 500;
+
+// search_files limits (decoupled from read_file)
+const MAX_SEARCH_BYTES  = 20 * 1024;
+const MAX_SEARCH_MATCHES = 100;
+
+// run_command limits
+const MAX_OUTPUT_BYTES = 20 * 1024;
+const MAX_OUTPUT_LINES = 500;
+
+// list_files limits
+const MAX_ENTRIES    = 200;
+const DEFAULT_DEPTH  = 1;
 
 // ── Schema helpers ────────────────────────────────────────────────────────────
 
@@ -135,7 +147,7 @@ export const tools: AgentTool[] = [
 
   {
     name: 'run_command', label: 'Run Command',
-    description: 'Run a shell command. Returns stdout+stderr. Live output streamed. Large output truncated to log file.',
+    description: `Run a shell command. Output capped at ${MAX_OUTPUT_LINES} lines / ${MAX_OUTPUT_BYTES/1024}KB. Large output truncated to log file.`,
     parameters: obj({ cmd: str('Shell command'), cwd: str('Working directory (default: process cwd)') }, ['cmd']),
     async execute(_id, args, signal, onUpdate) {
       const cmd = args.cmd as string;
@@ -146,21 +158,31 @@ export const tools: AgentTool[] = [
         const child = spawn(cmd, { cwd, shell: true, timeout: CMD_TIMEOUT_MS });
         const chunks: Buffer[] = [];
         let totalBytes = 0;
+        let totalLines = 0;
         let logPath: string | undefined;
         let logStream: ReturnType<typeof createWriteStream> | undefined;
 
         const handleData = (data: Buffer) => {
-          onUpdate?.({ content: [{ type: 'text', text: data.toString('utf-8') }] });
+          const text = data.toString('utf-8');
+          onUpdate?.({ content: [{ type: 'text', text }] });
           if (logStream) logStream.write(data);
           chunks.push(data);
           totalBytes += data.length;
-          if (totalBytes > MAX_OUTPUT_BYTES && !logPath) {
+          totalLines += text.split('\n').length - 1;
+          // Start logging to file if either limit exceeded
+          if ((totalBytes > MAX_OUTPUT_BYTES || totalLines > MAX_OUTPUT_LINES) && !logPath) {
             logPath   = join(tmpdir(), `iter-cmd-${randomBytes(8).toString('hex')}.log`);
             logStream = createWriteStream(logPath, { flags: 'w' });
             for (const c of chunks) logStream.write(c);
           }
+          // Trim from middle to keep rolling buffer small
           while (totalBytes > MAX_OUTPUT_BYTES && chunks.length > 1) {
             totalBytes -= chunks.shift()!.length;
+          }
+          while (totalLines > MAX_OUTPUT_LINES && chunks.length > 1) {
+            const removed = chunks.shift()!;
+            totalBytes -= removed.length;
+            totalLines -= removed.toString('utf-8').split('\n').length - 1;
           }
         };
 
@@ -169,6 +191,12 @@ export const tools: AgentTool[] = [
         child.on('close', (code) => {
           if (logStream) logStream.end();
           let output = Buffer.concat(chunks).toString('utf-8').trimEnd() || '(no output)';
+          // Trim from middle if still over limits (keep start + tail for errors)
+          const lines = output.split('\n');
+          if (lines.length > MAX_OUTPUT_LINES) {
+            const keep = Math.floor(MAX_OUTPUT_LINES / 2);
+            output = lines.slice(0, keep).join('\n') + '\n... [truncated] ...\n' + lines.slice(-keep).join('\n');
+          }
           if (logPath) output = `[... truncated, log: ${logPath} ...]\n${output}`;
           if (code !== null && code !== 0) output = `EXIT ${code}:\n${output}`;
           resolve(ok(output));
@@ -181,13 +209,13 @@ export const tools: AgentTool[] = [
 
   {
     name: 'list_files', label: 'List Files',
-    description: `List files in a directory recursively. Default depth 2, max 5. Truncated at ${MAX_ENTRIES} entries.`,
-    parameters: obj({ path: str('Directory to list (default: cwd)'), depth: { ...num('Max depth (default 2)'), minimum: 0, maximum: 5 } }, []),
+    description: `List files in a directory. Default depth ${DEFAULT_DEPTH}, max depth 3. Cap at ${MAX_ENTRIES} entries.`,
+    parameters: obj({ path: str('Directory to list (default: cwd)'), depth: { ...num(`Max depth (default ${DEFAULT_DEPTH})`), minimum: 0, maximum: 3 } }, []),
     async execute(_id, args) {
       try {
         const dirPath = (args.path as string | undefined) ?? process.cwd();
         const lines: string[] = [];
-        await walk(dirPath, dirPath, (args.depth as number | undefined) ?? 2, lines, MAX_ENTRIES);
+        await walk(dirPath, dirPath, (args.depth as number | undefined) ?? DEFAULT_DEPTH, lines, MAX_ENTRIES);
         if (lines.length >= MAX_ENTRIES) lines.push(`[Truncated at ${MAX_ENTRIES} entries]`);
         return ok(lines.join('\n') || '(empty directory)');
       } catch (e) { return err(`ERROR: ${(e as Error)?.message ?? e}`); }
@@ -196,7 +224,7 @@ export const tools: AgentTool[] = [
 
   {
     name: 'search_files', label: 'Search Files',
-    description: 'Search for a text pattern using grep. Truncated at 50KB.',
+    description: `Search for a text pattern using grep. Max ${MAX_SEARCH_MATCHES} matches. Truncate at ${MAX_SEARCH_BYTES/1024}KB.`,
     parameters: obj({
       pattern: str('Pattern to search for'),
       path:    str('Directory to search (default: cwd)'),
@@ -217,14 +245,16 @@ export const tools: AgentTool[] = [
         child.stderr?.on('data', () => {});
         child.on('close', () => {
           const text = Buffer.concat(out).toString('utf-8').trim();
-          if (!text) return resolve(ok('(no matches)'));
+          if (!text || text === '') return resolve(ok('(no matches)'));
           let result = text;
-          if (Buffer.byteLength(text) > MAX_FILE_BYTES) {
-            result = Buffer.from(text).slice(0, MAX_FILE_BYTES).toString('utf-8');
+          const lines = result.split('\n');
+          if (lines.length > MAX_SEARCH_MATCHES) {
+            result = lines.slice(0, MAX_SEARCH_MATCHES).join('\n');
+            result += `\n[${lines.length - MAX_SEARCH_MATCHES} more matches. Refine pattern.]`;
+          } else if (Buffer.byteLength(text) > MAX_SEARCH_BYTES) {
+            result = Buffer.from(text).slice(0, MAX_SEARCH_BYTES).toString('utf-8');
             const lastNewline = result.lastIndexOf('\n');
-            result = result.slice(0, lastNewline) + '\n[Truncated at 50KB. Refine pattern for more targeted results.]';
-          } else {
-            result = result.split('\n').slice(0, 200).join('\n');
+            result = result.slice(0, lastNewline) + `\n[Truncated at ${MAX_SEARCH_BYTES/1024}KB. Refine pattern.]`;
           }
           resolve(ok(result));
         });
