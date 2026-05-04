@@ -132,7 +132,7 @@ function isGoogleRetryable(status: number, errorStatus: string | undefined): boo
 
 function parseOpenAIError(
   status: number, 
-  json: { error?: { message?: string; type?: string; code?: string } } | null,
+  json: { error?: { message?: string; type?: string; code?: string | number } } | null,
   response: Response,
 ): ProviderError {
   // OpenAI/OpenRouter error format: { "error": { "message": "...", "type": "server_error", "code": "rate_limit_error" } }
@@ -162,7 +162,7 @@ function parseOpenAIError(
   };
 }
 
-function isOpenAIRetryable(status: number, errorType: string | undefined, errorCode: string | undefined): boolean {
+function isOpenAIRetryable(status: number, errorType: string | undefined, errorCode: string | number | undefined): boolean {
   if (status === 429) return true;
   if (status >= 500) return true;
   
@@ -184,7 +184,7 @@ function isOpenAIRetryable(status: number, errorType: string | undefined, errorC
   if (errorType && retryableTypes.some(t => errorType.toLowerCase().includes(t))) {
     return true;
   }
-  if (errorCode && retryableCodes.some(c => errorCode.toLowerCase().includes(c))) {
+  if (errorCode && typeof errorCode === 'string' && retryableCodes.some(c => errorCode.toLowerCase().includes(c))) {
     return true;
   }
   

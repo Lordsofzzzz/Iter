@@ -179,11 +179,12 @@ export const tools: AgentTool[] = [
   {
     name: 'list_files', label: 'List Files',
     description: `List files in a directory recursively. Default depth 2, max 5. Truncated at ${MAX_ENTRIES} entries.`,
-    parameters: obj({ path: str('Directory to list'), depth: { ...num('Max depth (default 2)'), minimum: 0, maximum: 5 } }, ['path']),
+    parameters: obj({ path: str('Directory to list (default: cwd)'), depth: { ...num('Max depth (default 2)'), minimum: 0, maximum: 5 } }, []),
     async execute(_id, args) {
       try {
+        const dirPath = (args.path as string | undefined) ?? process.cwd();
         const lines: string[] = [];
-        await walk(args.path as string, args.path as string, (args.depth as number | undefined) ?? 2, lines, MAX_ENTRIES);
+        await walk(dirPath, dirPath, (args.depth as number | undefined) ?? 2, lines, MAX_ENTRIES);
         if (lines.length >= MAX_ENTRIES) lines.push(`[Truncated at ${MAX_ENTRIES} entries]`);
         return ok(lines.join('\n') || '(empty directory)');
       } catch (e) { return err(`ERROR: ${(e as Error)?.message ?? e}`); }

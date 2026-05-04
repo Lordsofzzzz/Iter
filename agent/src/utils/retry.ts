@@ -50,7 +50,7 @@ export async function retry<T>(
   
   // Check if retry is disabled in config
   if (!isRetryEnabled()) {
-    throw await fn(); // Will throw the error directly
+    return await fn();
   }
   
   try {
