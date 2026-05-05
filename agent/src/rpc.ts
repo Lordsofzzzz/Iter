@@ -24,6 +24,8 @@ export type PushEvent =
   | { type: 'error'; message: string }
   | { type: 'cooldown'; wait_ms: number; retries_left: number }
   | { type: 'retry_result'; success: boolean; attempt: number }
+  | { type: 'auto_retry_start'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+  | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
   | { type: 'tool_call';   name: string; input: string }
   | { type: 'tool_update'; tool_call_id: string; delta: string }
   | { type: 'tool_result'; name: string; output: string; log_path?: string }

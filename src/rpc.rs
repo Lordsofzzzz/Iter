@@ -25,6 +25,21 @@ pub enum PushEvent {
     Error { message: String },
     Cooldown { wait_ms: u64, retries_left: u32 },
     RetryResult { success: bool, attempt: u32 },
+    AutoRetryStart {
+        attempt: u32,
+        #[serde(rename = "maxAttempts")]
+        max_attempts: u32,
+        #[serde(rename = "delayMs")]
+        delay_ms: u64,
+        #[serde(rename = "errorMessage")]
+        error_message: String,
+    },
+    AutoRetryEnd {
+        success: bool,
+        attempt: u32,
+        #[serde(rename = "finalError")]
+        final_error: Option<String>,
+    },
     ToolCall { name: String, input: String },   // ← new
     ToolResult { name: String, output: String }, // ← new
     ToolUpdate { tool_call_id: String, delta: String }, // ← live streaming delta

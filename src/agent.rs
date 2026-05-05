@@ -158,6 +158,20 @@ fn handle_push_event(
             }
         }
 
+        PushEvent::AutoRetryStart { attempt, max_attempts, delay_ms, .. } => {
+            app.model_status = ModelStatus::Cooldown;
+            app.upsert_rate_limit(delay_ms, max_attempts - attempt);
+        }
+
+        PushEvent::AutoRetryEnd { success, attempt, final_error } => {
+            app.clear_rate_limit();
+            if !success {
+                if let Some(err) = final_error {
+                    app.push_system(format!("retry failed after {} attempts: {}", attempt, err));
+                }
+            }
+        }
+
         PushEvent::AgentEnd => {
             app.clear_rate_limit();
             app.end_streaming();
