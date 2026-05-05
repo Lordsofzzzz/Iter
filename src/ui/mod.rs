@@ -1,5 +1,5 @@
 pub mod chat;
-pub mod context;
+pub mod footer;
 pub mod layout;
 pub mod markdown;
 pub mod model_picker;

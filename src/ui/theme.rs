@@ -18,6 +18,9 @@ pub const BG: Color = Color::Rgb(10, 10, 12);
 /// Assistant bubble background — slightly elevated from BG.
 pub const BUBBLE_BG: Color = Color::Rgb(22, 24, 30);
 
+/// Footer background — slightly lighter than BG to visually separate.
+pub const FOOTER_BG: Color = Color::Rgb(18, 18, 22);
+
 /// Bar color for the assistant bubble left border.
 pub const BUBBLE_BAR: Style = Style::new().fg(Color::Green).bg(Color::Rgb(22, 24, 30));
 
