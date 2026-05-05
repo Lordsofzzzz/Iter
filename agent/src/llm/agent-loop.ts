@@ -10,12 +10,8 @@
  * - Streams partial assistant messages into context during LLM response
  */
 
-import { emitEvent as rpcEmitEvent } from '../rpc.js';
 import { streamLLM } from './stream.js';
 import { validateToolArguments } from '../utils/validation.js';
-import { isRetryableError } from '../utils/retry.js';
-import { getRetryConfig } from '../config.js';
-import { logToFile } from '../utils/logger.js';
 import type {
   AfterToolCallResult,
   AgentContext,
@@ -100,75 +96,21 @@ async function runLoop(
         pendingMessages = [];
       }
 
-      // Stream one LLM response — with auto-retry on transient errors (pi-mono pattern).
-      const retryCfg  = getRetryConfig();
-      const maxRetries = retryCfg.enabled ? retryCfg.maxRetries : 0;
-      let   message: AssistantMessage | null = null;
-
-      for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-        const candidate = await streamAssistantResponse(ctx, config, signal, emit);
-
-        if (candidate.stopReason === 'aborted') {
-          // Never retry an abort.
-          message = candidate;
-          break;
-        }
-
-        if (candidate.stopReason === 'error') {
-          const errMsg = candidate.errorMessage ?? 'unknown error';
-
-          const retryable = isRetryableError(new Error(errMsg));
-          const attemptsLeft = maxRetries + 1 - attempt;
-
-          if (!retryable || attemptsLeft === 0) {
-            // Non-retryable or out of retries — surface the error.
-            if (attempt > 1) {
-              rpcEmitEvent({ type: 'auto_retry_end', success: false, attempt, finalError: errMsg });
-            }
-            message = candidate;
-            break;
-          }
-
-          // Retryable — pop the failed partial from context, sleep, retry.
-          const delayMs = retryCfg.baseDelayMs * Math.pow(2, attempt - 1);
-          logToFile(`[retry] attempt=${attempt} retrying in ${delayMs}ms: ${errMsg}`);
-          rpcEmitEvent({ type: 'auto_retry_start', attempt, maxAttempts: maxRetries + 1, delayMs, errorMessage: errMsg });
-
-          // Remove the failed message from context (it was pushed by streamAssistantResponse).
-          if (ctx.messages.at(-1)?.role === 'assistant') {
-            ctx.messages.pop();
-          }
-
-          // Abortable sleep.
-          await new Promise<void>((resolve, reject) => {
-            if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
-            const t = setTimeout(resolve, delayMs);
-            signal?.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
-          });
-
-          continue;
-        }
-
-        // Success.
-        if (attempt > 1) {
-          rpcEmitEvent({ type: 'auto_retry_end', success: true, attempt });
-        }
-        message = candidate;
-        break;
-      }
-
-      newMessages.push(message!);
+      // Stream one LLM response — no retry here. Retry lives in the caller (LLMClient)
+      // on agent_end, mirroring pi-mono's agent-session._handleRetryableError pattern.
+      const message = await streamAssistantResponse(ctx, config, signal, emit);
+      newMessages.push(message);
 
       // Stop on error or abort — pi pattern: return normally, caller checks stopReason.
       // Never throw here — throwing prevents newMessages from being persisted in client.ts finally.
-      if (message!.stopReason === 'error' || message!.stopReason === 'aborted') {
-        await emitAsync(emit, { type: 'turn_end', message: message!, toolResults: [] });
+      if (message.stopReason === 'error' || message.stopReason === 'aborted') {
+        await emitAsync(emit, { type: 'turn_end', message, toolResults: [] });
         await emitAsync(emit, { type: 'agent_end', messages: newMessages });
         return;
       }
 
       // Execute any tool calls.
-      const toolCalls = message!.content.filter(
+      const toolCalls = message.content.filter(
         (c): c is ToolCall => c.type === 'toolCall'
       );
 
@@ -176,7 +118,7 @@ async function runLoop(
       hasMoreToolCalls = false;
 
       if (toolCalls.length > 0) {
-        const batch = await executeToolCalls(ctx, message!, toolCalls, config, signal, emit);
+        const batch = await executeToolCalls(ctx, message, toolCalls, config, signal, emit);
         toolResults.push(...batch.messages);
         hasMoreToolCalls = !batch.terminate;
 
@@ -186,10 +128,10 @@ async function runLoop(
         }
       }
 
-      await emitAsync(emit, { type: 'turn_end', message: message!, toolResults });
+      await emitAsync(emit, { type: 'turn_end', message, toolResults });
 
       // shouldStopAfterTurn hook.
-      if (await config.shouldStopAfterTurn?.({ message: message!, toolResults, context: ctx, newMessages })) {
+      if (await config.shouldStopAfterTurn?.({ message, toolResults, context: ctx, newMessages })) {
         await emitAsync(emit, { type: 'agent_end', messages: newMessages });
         return;
       }

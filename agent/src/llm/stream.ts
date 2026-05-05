@@ -9,6 +9,7 @@
  *   google-generative-ai  → streamGoogle     (Google Gemini API)
  */
 
+import OpenAI from 'openai';
 import type {
   AgentContext,
   AgentTool,
@@ -198,20 +199,6 @@ interface ORToolCallDelta {
   function?: { name?: string; arguments?: string };
 }
 
-interface ORChunk {
-  choices?: Array<{
-    delta:          ORDelta;
-    finish_reason?: string | null;
-  }>;
-  usage?: {
-    prompt_tokens?:      number;
-    completion_tokens?:  number;
-    prompt_cache_hit_tokens?: number;
-    cache_creation_input_tokens?: number;
-    prompt_cache_miss_tokens?: number;
-  };
-}
-
 // ── Message converter ─────────────────────────────────────────────────────────
 
 /** Convert our internal Message[] to OpenRouter wire format. */
@@ -325,28 +312,44 @@ export async function* streamOpenRouter(
     apiType?: 'openai-completions';
   },
 ): AsyncIterable<AssistantMessageEvent> {
-  const apiKey = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
+  const apiKey  = options.apiKey ?? process.env.OPENROUTER_API_KEY ?? '';
   const baseUrl = options.baseUrl ?? OPENROUTER_BASE;
-  const apiType = options.apiType ?? 'openai-completions';
+  const cfg     = getConfig();
+
   console.error('[DEBUG] API Key present:', !!apiKey, 'Key prefix:', apiKey.substring(0, 20));
 
-  const body: Record<string, unknown> = {
+  // ── OpenAI SDK client — built-in retry (maxRetries=2) + Retry-After handling ──
+  const client = new OpenAI({
+    apiKey,
+    baseURL:                baseUrl,
+    dangerouslyAllowBrowser: false,
+    defaultHeaders: {
+      'HTTP-Referer': 'https://github.com/iter-coding-agent',
+      'X-Title':      'Iter',
+    },
+    maxRetries: 2,
+    timeout:    cfg.timeoutMs,
+  });
+
+  // ── Build request params ─────────────────────────────────────────────────────
+  const messages = toOpenRouterMessages(context.messages);
+  if (context.systemPrompt) {
+    (messages as unknown[]).unshift({ role: 'system', content: context.systemPrompt });
+  }
+
+  const params: Record<string, unknown> = {
     model,
-    temperature: options.temperature,
-    stream:      true,
-    messages:    toOpenRouterMessages(context.messages),
+    temperature:    options.temperature,
+    stream:         true,
+    stream_options: { include_usage: true },
+    messages,
   };
 
-  if (context.systemPrompt) {
-    (body.messages as unknown[]).unshift({ role: 'system', content: context.systemPrompt });
-  }
-
   if (context.tools && context.tools.length > 0) {
-    body.tools       = toOpenRouterTools(context.tools);
-    body.tool_choice = 'auto';
+    params.tools       = toOpenRouterTools(context.tools);
+    params.tool_choice = 'auto';
   }
 
-  // Reasoning: ask for extended thinking if model supports it.
   const isThinkingModel =
     model.includes(':thinking') ||
     model.includes('deepseek-r') ||
@@ -355,335 +358,208 @@ export async function* streamOpenRouter(
     model.includes('reasoning');
 
   if (isThinkingModel) {
-    body.reasoning = { effort: 'medium' };
+    params.reasoning = { effort: 'medium' };
   }
 
-  let response: Response;
-  console.error('[DEBUG] Starting fetch to OpenRouter');
-  try {
-    const controller = new AbortController();
-    const timeoutMs = getConfig().timeoutMs;
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    if (options.signal) {
-      options.signal.addEventListener('abort', () => controller.abort(), { once: true });
-    }
-    response = await fetch(`${baseUrl}/chat/completions`, {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer':  'https://github.com/iter-coding-agent',
-        'X-Title':       'Iter',
-      },
-      body:   JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-  } catch (err) {
-    console.error('[DEBUG] Fetch error:', err);
-    const isAbort = (err as Error)?.name === 'AbortError';
-    const partial = blankPartial();
-    partial.stopReason    = isAbort ? 'aborted' : 'error';
-    partial.errorMessage  = isAbort ? 'Aborted' : String((err as Error)?.message ?? err);
-    yield { type: 'error', reason: partial.stopReason as 'aborted' | 'error', error: partial };
-    return;
-  }
-
-if (!response.ok) {
-    console.error('[DEBUG] Response not OK:', response.status);
-    const text = await response.text().catch(() => '');
-
-    const providerErr = parseProviderError(response, text, apiType);
-    const partial = blankPartial();
-    partial.stopReason = 'error';
-    partial.errorMessage = providerErr.message;
-    yield { type: 'error', reason: 'error', error: partial };
-    return;
-  }
-
-  console.error('[DEBUG] Response OK, starting SSE parse');
-  // ── SSE parsing state ──────────────────────────────────────────────────────
+  // ── Stream state ─────────────────────────────────────────────────────────────
   const partial = blankPartial();
   let emittedStart = false;
 
-  // Per-content-block accumulators.
-  let textBuffer     = '';
-  let thinkingBuffer = '';
-
-  // State machine for MiniMax reasoning stream:
-  // MiniMax sends tool calls after </thinking> inside delta.reasoning.
-  // thinkingClosed = true once we detect the tool-call boundary — all subsequent
-  // reasoning deltas are routed to the XML tool call parser, not the thinking block.
-  // We detect the boundary by the PRESENCE of XML tool call tags, NOT by </thinking>
-  // text (which could legitimately appear inside code examples in thinking content).
-  let thinkingClosed = false;
-  // Overflow buffer: holds reasoning text that arrived in the same chunk as the
-  // boundary marker but before we identified it.
+  let textBuffer        = '';
+  let thinkingBuffer    = '';
+  let thinkingClosed    = false;
   let reasoningOverflow = '';
 
-  // Tool call accumulators keyed by index.
   const tcAccum: Map<number, {
-    id:        string;
-    name:      string;
-    argsRaw:   string;
+    id:         string;
+    name:       string;
+    argsRaw:    string;
     contentIdx: number;
-    finalized?: boolean;   // true = already emitted (XML path), skip in finalization loop
+    finalized?: boolean;
   }> = new Map();
 
   let finishReason: string | null = null;
   let usageFromChunk: OROUsage | null = null;
-  // Accumulate reasoning_details blocks from OpenRouter SSE.
-  // Must be passed back unmodified on next turn — OpenRouter docs explicitly require this for MiniMax.
   const reasoningDetailsAcc: unknown[] = [];
 
-  // ── Read SSE stream ────────────────────────────────────────────────────────
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
+  // ── Inline helper: emit XML-embedded tool calls ───────────────────────────
+  const emitAsXml = async function*(raw: string) {
+    const { textBefore, calls } = extractXmlToolCalls(raw);
+    if (textBefore.trim()) {
+      if (partial.content.filter(c => c.type === 'text').length === 0) {
+        const idx = partial.content.length;
+        partial.content.push({ type: 'text', text: '' });
+        yield { type: 'text_start' as const, contentIndex: idx, partial: { ...partial } };
+      }
+      const textIdx = findLastIndex(partial.content, c => c.type === 'text');
+      textBuffer += textBefore;
+      (partial.content[textIdx] as TextContent).text = textBuffer;
+      yield { type: 'text_delta' as const, contentIndex: textIdx, delta: textBefore, partial: { ...partial } };
+    }
+    for (const xmlTc of calls) {
+      const contentIdx = partial.content.length;
+      partial.content.push({ type: 'toolCall', id: '', name: '', arguments: {} });
+      yield { type: 'toolcall_start' as const, contentIndex: contentIdx, partial: { ...partial } };
+      const toolCall: ToolCall = { type: 'toolCall', id: xmlTc.id, name: xmlTc.name, arguments: xmlTc.arguments };
+      partial.content[contentIdx] = toolCall;
+      tcAccum.set(10000 + contentIdx, { id: xmlTc.id, name: xmlTc.name, argsRaw: JSON.stringify(xmlTc.arguments), contentIdx, finalized: true });
+      yield { type: 'toolcall_end' as const, contentIndex: contentIdx, toolCall, partial: { ...partial } };
+    }
+  };
 
+  // ── SDK stream ───────────────────────────────────────────────────────────────
   try {
-    outer: while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+    console.error('[DEBUG] Starting OpenAI SDK stream');
+    // Cast needed: SDK types don't expose custom fields (reasoning, stream_options, etc.)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await client.chat.completions.create(
+      params as any,
+      { signal: options.signal },
+    ) as unknown as AsyncIterable<{ choices?: Array<{ delta?: ORDelta; finish_reason?: string }>; usage?: OROUsage }>;
 
-      // Split on SSE line boundaries.
-      const lines = buf.split('\n');
-      buf = lines.pop()!; // keep incomplete line
+    for await (const chunk of response) {
+      if (chunk.usage) usageFromChunk = chunk.usage as OROUsage;
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
+      const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
+      if (!choice) continue;
 
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') break outer;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
 
-        let chunk: ORChunk;
-        try { chunk = JSON.parse(data); } catch { continue; }
+      const delta = choice.delta as ORDelta & { reasoning_details?: unknown[] };
 
-        // Log raw delta for diagnosis (only when DEBUG_SSE=1).
-        if (process.env['DEBUG_SSE'] === '1') {
-          const rawDelta = chunk.choices?.[0]?.delta;
-          if (rawDelta?.content !== undefined && rawDelta.content !== null) {
-            const contentType = Array.isArray(rawDelta.content) ? 'array' : typeof rawDelta.content;
-            logToFile(`[SSE] delta.content type=${contentType} value=${JSON.stringify(rawDelta.content).slice(0, 120)}`);
+      // Capture reasoning_details for passback (OpenRouter MiniMax requirement).
+      if (delta.reasoning_details && Array.isArray(delta.reasoning_details)) {
+        for (const rd of delta.reasoning_details) reasoningDetailsAcc.push(rd);
+      }
+
+      // Emit start on first delta.
+      if (!emittedStart) {
+        emittedStart = true;
+        yield { type: 'start', partial: { ...partial } };
+      }
+
+      // ── Reasoning / thinking delta ───────────────────────────────────────
+      if (delta.reasoning) {
+        const raw = reasoningOverflow + delta.reasoning;
+        reasoningOverflow = '';
+
+        // Detect XML tool-call boundary (MiniMax quirk: tool calls arrive via delta.reasoning).
+        const TOOL_MARKERS = ['<minimax:tool_call>', '<invoke name=', '<tool_call>'];
+        let boundaryIdx = -1;
+        if (!thinkingClosed) {
+          for (const marker of TOOL_MARKERS) {
+            const idx = raw.indexOf(marker);
+            if (idx !== -1 && (boundaryIdx === -1 || idx < boundaryIdx)) boundaryIdx = idx;
           }
         }
 
-
-        // Capture usage if provided.
-        if (chunk.usage) usageFromChunk = chunk.usage as OROUsage;
-
-        // Capture reasoning_details for passback (OpenRouter MiniMax requirement).
-        if (chunk.choices?.[0]?.delta?.reasoning_details) {
-          for (const rd of chunk.choices[0].delta.reasoning_details as unknown[]) {
-            reasoningDetailsAcc.push(rd);
-          }
-        }
-
-        const choice = chunk.choices?.[0];
-        if (!choice) continue;
-
-        if (choice.finish_reason) finishReason = choice.finish_reason;
-
-        const delta = choice.delta;
-
-        // ── Emit start on first delta ────────────────────────────────────
-        if (!emittedStart) {
-          emittedStart = true;
-          yield { type: 'start', partial: { ...partial } };
-        }
-
-        // ── Reasoning / thinking delta ───────────────────────────────────
-        // MiniMax quirk: tool call XML arrives via delta.reasoning, appended
-        // AFTER </thinking> within the same reasoning stream.
-        //
-        // The WRONG approach (old): split on the text "</thinking>" — fragile
-        // because a model might write </thinking> inside a code block example
-        // in its actual thinking content.
-        //
-        // The RIGHT approach: detect tool-call XML tags as the boundary marker.
-        // Tool call XML is unambiguous — <minimax:tool_call> or <invoke name=
-        // cannot appear as legitimate thinking prose. Once we see these tags,
-        // the thinking phase is definitively over (thinkingClosed = true) and
-        // all subsequent reasoning deltas are routed through extractXmlToolCalls.
-        if (delta.reasoning) {
-          const raw = reasoningOverflow + delta.reasoning;
-          reasoningOverflow = '';
-
-          // Detect the tool-call boundary by presence of XML tool call markers.
-          // We look for the earliest position of any tool-call opening tag.
-          const TOOL_MARKERS = ['<minimax:tool_call>', '<invoke name=', '<tool_call>'];
-          let boundaryIdx = -1;
-          let matchedMarker = '';
-          if (!thinkingClosed) {
-            for (const marker of TOOL_MARKERS) {
-              const idx = raw.indexOf(marker);
-              if (idx !== -1 && (boundaryIdx === -1 || idx < boundaryIdx)) {
-                boundaryIdx = idx;
-                matchedMarker = marker;
+        if (!thinkingClosed && boundaryIdx === -1) {
+          // Pure thinking — hold back possible partial marker at end.
+          let safeUpto = raw.length;
+          for (const marker of TOOL_MARKERS) {
+            for (let len = Math.min(marker.length - 1, raw.length); len >= 1; len--) {
+              if (raw.endsWith(marker.slice(0, len))) {
+                safeUpto = Math.min(safeUpto, raw.length - len);
+                break;
               }
             }
           }
-
-          // Helper: emit a chunk as XML tool calls (post-boundary path).
-          // Declared as an inline async generator so yield works correctly.
-          const emitAsXml = async function*(chunk: string) {
-            const { textBefore, calls } = extractXmlToolCalls(chunk);
-            if (textBefore.trim()) {
-              const isFirstText = partial.content.filter(c => c.type === 'text').length === 0;
-              if (isFirstText) {
-                const idx = partial.content.length;
-                partial.content.push({ type: 'text', text: '' });
-                yield { type: 'text_start' as const, contentIndex: idx, partial: { ...partial } };
-              }
-              const textIdx = findLastIndex(partial.content, c => c.type === 'text');
-              textBuffer += textBefore;
-              (partial.content[textIdx] as TextContent).text = textBuffer;
-              yield { type: 'text_delta' as const, contentIndex: textIdx, delta: textBefore, partial: { ...partial } };
-            }
-            for (const xmlTc of calls) {
-              const contentIdx = partial.content.length;
-              partial.content.push({ type: 'toolCall', id: '', name: '', arguments: {} });
-              yield { type: 'toolcall_start' as const, contentIndex: contentIdx, partial: { ...partial } };
-              const toolCall: ToolCall = { type: 'toolCall', id: xmlTc.id, name: xmlTc.name, arguments: xmlTc.arguments };
-              partial.content[contentIdx] = toolCall;
-              tcAccum.set(10000 + contentIdx, { id: xmlTc.id, name: xmlTc.name, argsRaw: JSON.stringify(xmlTc.arguments), contentIdx, finalized: true });
-              yield { type: 'toolcall_end' as const, contentIndex: contentIdx, toolCall, partial: { ...partial } };
-            }
-          };
-
-          if (!thinkingClosed && boundaryIdx === -1) {
-            // Pure thinking content — no tool call markers anywhere.
-            // But guard against a partial marker split across two chunks:
-            // e.g. chunk 1 ends with "<minimax:" and chunk 2 starts with "tool_call>".
-            // We hold back the last N chars as overflow when the chunk ends with a
-            // partial match of any marker prefix.
-            let safeUpto = raw.length;
-            for (const marker of TOOL_MARKERS) {
-              // Find the longest suffix of `raw` that is a prefix of `marker`.
-              for (let len = Math.min(marker.length - 1, raw.length); len >= 1; len--) {
-                if (raw.endsWith(marker.slice(0, len))) {
-                  safeUpto = Math.min(safeUpto, raw.length - len);
-                  break;
-                }
-              }
-            }
-
-            const thinkPart = raw.slice(0, safeUpto);
-            reasoningOverflow = raw.slice(safeUpto);
-
-            if (thinkPart) {
-              if (thinkingBuffer === '') {
-                const idx = partial.content.length;
-                partial.content.push({ type: 'thinking', thinking: '' });
-                yield { type: 'thinking_start', contentIndex: idx, partial: { ...partial } };
-              }
-              const thinkingIdx = findLastIndex(partial.content, c => c.type === 'thinking');
-              thinkingBuffer += thinkPart;
-              (partial.content[thinkingIdx] as ThinkingContent).thinking = thinkingBuffer;
-              yield { type: 'thinking_delta', contentIndex: thinkingIdx, delta: thinkPart, partial: { ...partial } };
-            }
-
-          } else if (!thinkingClosed && boundaryIdx !== -1) {
-            // Boundary found in this chunk. Everything before it is thinking content,
-            // everything from the marker onwards is tool call XML.
-            thinkingClosed = true;
-
-            const thinkPart = raw.slice(0, boundaryIdx)
-              // Strip trailing </thinking> if present — it's structural, not content.
-              .replace(/<\/thinking>\s*$/, '').trimEnd();
-            const xmlPart   = raw.slice(boundaryIdx);
-
-            if (thinkPart) {
-              if (thinkingBuffer === '') {
-                const idx = partial.content.length;
-                partial.content.push({ type: 'thinking', thinking: '' });
-                yield { type: 'thinking_start', contentIndex: idx, partial: { ...partial } };
-              }
-              const thinkingIdx = findLastIndex(partial.content, c => c.type === 'thinking');
-              thinkingBuffer += thinkPart;
-              (partial.content[thinkingIdx] as ThinkingContent).thinking = thinkingBuffer;
-              yield { type: 'thinking_delta', contentIndex: thinkingIdx, delta: thinkPart, partial: { ...partial } };
-            }
-
-            if (xmlPart.trim()) {
-              yield* emitAsXml(xmlPart);
-            }
-
-          } else {
-            // thinkingClosed — all subsequent reasoning deltas are tool call XML.
-            if (raw.trim()) {
-              yield* emitAsXml(raw);
-            }
-          }
-        }
-
-        // ── Text delta ───────────────────────────────────────────────────
-        // delta.content may be a string (standard) or array-of-parts (some models).
-        const rawContent = delta.content;
-        const contentStr: string | null | undefined =
-          Array.isArray(rawContent)
-            ? (rawContent as Array<{type?: string; text?: string}>)
-                .filter(p => p.type === 'text' || p.text !== undefined)
-                .map(p => p.text ?? '')
-                .join('')
-            : rawContent;
-
-        if (contentStr) {
-          const { textBefore, calls } = extractXmlToolCalls(contentStr);
-
-          // Surface any non-XML prose.
-          if (textBefore) {
-            const isFirstText = partial.content.filter(c => c.type === 'text').length === 0;
-            if (isFirstText) {
+          const thinkPart = raw.slice(0, safeUpto);
+          reasoningOverflow = raw.slice(safeUpto);
+          if (thinkPart) {
+            if (thinkingBuffer === '') {
               const idx = partial.content.length;
-              partial.content.push({ type: 'text', text: '' });
-              yield { type: 'text_start', contentIndex: idx, partial: { ...partial } };
+              partial.content.push({ type: 'thinking', thinking: '' });
+              yield { type: 'thinking_start', contentIndex: idx, partial: { ...partial } };
             }
-            const textIdx = findLastIndex(partial.content, c => c.type === 'text');
-            textBuffer += textBefore;
-            (partial.content[textIdx] as TextContent).text = textBuffer;
-            yield { type: 'text_delta', contentIndex: textIdx, delta: textBefore, partial: { ...partial } };
+            const ti = findLastIndex(partial.content, c => c.type === 'thinking');
+            thinkingBuffer += thinkPart;
+            (partial.content[ti] as ThinkingContent).thinking = thinkingBuffer;
+            yield { type: 'thinking_delta', contentIndex: ti, delta: thinkPart, partial: { ...partial } };
           }
+        } else if (!thinkingClosed && boundaryIdx !== -1) {
+          thinkingClosed = true;
+          const thinkPart = raw.slice(0, boundaryIdx).replace(/<\/thinking>\s*$/, '').trimEnd();
+          const xmlPart   = raw.slice(boundaryIdx);
+          if (thinkPart) {
+            if (thinkingBuffer === '') {
+              const idx = partial.content.length;
+              partial.content.push({ type: 'thinking', thinking: '' });
+              yield { type: 'thinking_start', contentIndex: idx, partial: { ...partial } };
+            }
+            const ti = findLastIndex(partial.content, c => c.type === 'thinking');
+            thinkingBuffer += thinkPart;
+            (partial.content[ti] as ThinkingContent).thinking = thinkingBuffer;
+            yield { type: 'thinking_delta', contentIndex: ti, delta: thinkPart, partial: { ...partial } };
+          }
+          if (xmlPart.trim()) yield* emitAsXml(xmlPart);
+        } else {
+          if (raw.trim()) yield* emitAsXml(raw);
+        }
+      }
 
-          // Convert XML-embedded tool calls into proper toolCall content blocks.
-          for (const xmlTc of calls) {
+      // ── Text delta ────────────────────────────────────────────────────────
+      const rawContent = delta.content;
+      const contentStr: string | null | undefined =
+        Array.isArray(rawContent)
+          ? (rawContent as Array<{type?: string; text?: string}>)
+              .filter(p => p.type === 'text' || p.text !== undefined)
+              .map(p => p.text ?? '')
+              .join('')
+          : rawContent;
+
+      if (contentStr) {
+        const { textBefore, calls } = extractXmlToolCalls(contentStr);
+        if (textBefore) {
+          if (partial.content.filter(c => c.type === 'text').length === 0) {
+            const idx = partial.content.length;
+            partial.content.push({ type: 'text', text: '' });
+            yield { type: 'text_start', contentIndex: idx, partial: { ...partial } };
+          }
+          const ti = findLastIndex(partial.content, c => c.type === 'text');
+          textBuffer += textBefore;
+          (partial.content[ti] as TextContent).text = textBuffer;
+          yield { type: 'text_delta', contentIndex: ti, delta: textBefore, partial: { ...partial } };
+        }
+        for (const xmlTc of calls) {
+          const contentIdx = partial.content.length;
+          partial.content.push({ type: 'toolCall', id: '', name: '', arguments: {} });
+          yield { type: 'toolcall_start', contentIndex: contentIdx, partial: { ...partial } };
+          const toolCall: ToolCall = { type: 'toolCall', id: xmlTc.id, name: xmlTc.name, arguments: xmlTc.arguments };
+          partial.content[contentIdx] = toolCall;
+          tcAccum.set(10000 + contentIdx, { id: xmlTc.id, name: xmlTc.name, argsRaw: JSON.stringify(xmlTc.arguments), contentIdx, finalized: true });
+          yield { type: 'toolcall_end', contentIndex: contentIdx, toolCall, partial: { ...partial } };
+        }
+      }
+
+      // ── Tool call deltas ──────────────────────────────────────────────────
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          if (!tcAccum.has(tc.index)) {
             const contentIdx = partial.content.length;
             partial.content.push({ type: 'toolCall', id: '', name: '', arguments: {} });
+            tcAccum.set(tc.index, { id: '', name: '', argsRaw: '', contentIdx });
             yield { type: 'toolcall_start', contentIndex: contentIdx, partial: { ...partial } };
-            const toolCall: ToolCall = { type: 'toolCall', id: xmlTc.id, name: xmlTc.name, arguments: xmlTc.arguments };
-            partial.content[contentIdx] = toolCall;
-            // Store with finalized=true so the post-stream finalization loop skips it.
-            tcAccum.set(10000 + contentIdx, { id: xmlTc.id, name: xmlTc.name, argsRaw: JSON.stringify(xmlTc.arguments), contentIdx, finalized: true });
-            yield { type: 'toolcall_end', contentIndex: contentIdx, toolCall, partial: { ...partial } };
           }
-        }
-
-        // ── Tool call deltas ─────────────────────────────────────────────
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            if (!tcAccum.has(tc.index)) {
-              const contentIdx = partial.content.length;
-              // Placeholder — filled in at toolcall_end.
-              partial.content.push({ type: 'toolCall', id: '', name: '', arguments: {} });
-              tcAccum.set(tc.index, { id: '', name: '', argsRaw: '', contentIdx });
-              yield { type: 'toolcall_start', contentIndex: contentIdx, partial: { ...partial } };
-            }
-
-            const acc = tcAccum.get(tc.index)!;
-            if (tc.id)                acc.id          += tc.id;
-            if (tc.function?.name)    acc.name         += tc.function.name;
-            if (tc.function?.arguments) {
-              acc.argsRaw += tc.function.arguments;
-              yield { type: 'toolcall_delta', contentIndex: acc.contentIdx, delta: tc.function.arguments, partial: { ...partial } };
-            }
+          const acc = tcAccum.get(tc.index)!;
+          if (tc.id)                  acc.id      += tc.id;
+          if (tc.function?.name)      acc.name    += tc.function.name;
+          if (tc.function?.arguments) {
+            acc.argsRaw += tc.function.arguments;
+            yield { type: 'toolcall_delta', contentIndex: acc.contentIdx, delta: tc.function.arguments, partial: { ...partial } };
           }
         }
       }
     }
-  } finally {
-    reader.releaseLock();
+  } catch (err) {
+    console.error('[DEBUG] SDK stream error:', err);
+    const isAbort = (err as Error)?.name === 'AbortError' || options.signal?.aborted;
+    partial.stopReason   = isAbort ? 'aborted' : 'error';
+    partial.errorMessage = isAbort ? 'Aborted' : String((err as Error)?.message ?? err);
+    yield { type: 'error', reason: partial.stopReason as 'aborted' | 'error', error: partial };
+    return;
   }
+
 
   // ── Finalise thinking block ────────────────────────────────────────────────
   if (thinkingBuffer) {

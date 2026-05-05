@@ -7,7 +7,8 @@
  */
 
 import { emitEvent, SessionStatsData } from '../rpc.js';
-import { retry, isRetryEnabled, getRetryConfig } from '../config.js';
+import { getRetryConfig, isRetryEnabled } from '../config.js';
+import { isGenericRetryable } from './provider-error.js';
 import { Stats } from './stats.js';
 import { runAgentLoop }                 from './agent-loop.js';
 import { buildSystemPrompt }            from '../system-prompt.js';
@@ -85,15 +86,12 @@ export async function fetchModelLimits(): Promise<Array<{ id: string; name: stri
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class LLMClient {
-  // Plain array — no History wrapper class. Pi stores messages directly on state.messages.
-  // Using a wrapper class caused Bun runtime issues where .push() was undefined.
   private messages: Message[] = [];
   private readonly stats           = new Stats();
   private abortController: AbortController | null = null;
   private cachedSystemPrompt: string | null = null;
-  // Retry counter that resets after each successful LLM call (pi-mono pattern)
-  private retryCount = 0;
-  private get maxRetries() { return getRetryConfig().maxRetries; }
+  // Session-level retry counter — lives outside the loop, resets on success (pi pattern)
+  private _retryAttempt = 0;
 
   private getSystemPrompt(): string {
     if (!this.cachedSystemPrompt) {
@@ -146,35 +144,38 @@ export class LLMClient {
     if (model) _activeModel = model;
 
     this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
+    const retryCfg   = getRetryConfig();
+    const maxRetries = isRetryEnabled() ? retryCfg.maxRetries : 0;
 
     try {
-      await retry(async () => {
-        // Snapshot history for this run.
-        const contextMessages = [...this.messages];
-
+      // ── Pi-style session-level retry ──────────────────────────────────────
+      // The agent loop is dumb (single LLM call, emits agent_end on error).
+      // We check the result here and re-run with backoff — counter survives
+      // across tool-call turns. Mirrors pi-mono agent-session._handleRetryableError.
+      while (true) {
         const newMessages = await runAgentLoop(
           userMessage,
           {
             systemPrompt: this.getSystemPrompt(),
-            messages:     contextMessages,
+            messages:     [...this.messages],
             tools,
           },
           {
-            model:          _activeModel,
-            temperature:    MODEL_TEMP,
-            toolExecution:  'parallel',
+            model:            _activeModel,
+            temperature:      MODEL_TEMP,
+            toolExecution:    'parallel',
             transformContext: async (msgs) => transformContext(msgs),
           },
           (event: AgentLoopEvent) => this.handleLoopEvent(event),
-          this.abortController!.signal,
+          signal,
         );
 
-        // Persist all new messages — runAgentLoop always returns normally now (pi pattern).
-        for (const msg of newMessages) {
-          this.messages.push(msg);
-        }
+        // Persist messages.
+        for (const msg of newMessages) this.messages.push(msg);
 
-        // Sum token stats from ALL assistant messages.
+        // Sum token stats.
         for (const msg of newMessages) {
           if (msg.role === 'assistant' && (msg as AssistantMessage).usage) {
             const u = (msg as AssistantMessage).usage;
@@ -182,30 +183,54 @@ export class LLMClient {
           }
         }
 
-        // Check for retryable errors — re-throw to trigger retry with backoff.
         const lastAssistant = [...newMessages]
           .reverse()
           .find((m): m is AssistantMessage => m.role === 'assistant');
 
         if (lastAssistant?.stopReason === 'error') {
-          const msg = lastAssistant.errorMessage ?? 'unknown';
-          // Check if retryable (429 or server error) — re-throw to trigger backoff.
-          if (msg.includes('429') || /5\d{2}/.test(msg) || /server\s*error/i.test(msg)) {
-            this.retryCount++;
-            const err = new Error(msg);
-            (err as any).statusCode = msg.includes('429') ? 429 : 500;
-            throw err;
+          const errMsg = lastAssistant.errorMessage ?? 'unknown';
+
+          if (this._retryAttempt < maxRetries && isGenericRetryable(0, errMsg)) {
+            this._retryAttempt++;
+            const delayMs = retryCfg.baseDelayMs * Math.pow(2, this._retryAttempt - 1);
+
+            emitEvent({
+              type:         'auto_retry_start',
+              attempt:      this._retryAttempt,
+              maxAttempts:  maxRetries,
+              delayMs,
+              errorMessage: errMsg,
+            });
+
+            // Pop the failed assistant message so next run doesn't see it.
+            if (this.messages.at(-1)?.role === 'assistant') this.messages.pop();
+
+            // Abortable sleep.
+            await new Promise<void>((resolve, reject) => {
+              if (signal.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+              const t = setTimeout(resolve, delayMs);
+              signal.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+            });
+
+            continue; // re-run loop
           }
-          emitEvent({ type: 'error', message: `LLM error: ${msg}` });
+
+          // Non-retryable or exhausted.
+          if (this._retryAttempt > 0) {
+            emitEvent({ type: 'auto_retry_end', success: false, attempt: this._retryAttempt, finalError: errMsg });
+          }
+          emitEvent({ type: 'error', message: `LLM error: ${errMsg}` });
+        } else if (this._retryAttempt > 0) {
+          emitEvent({ type: 'auto_retry_end', success: true, attempt: this._retryAttempt });
         }
 
-        // Reset retry counter on successful response (pi-mono pattern)
-        this.retryCount = 0;
+        this._retryAttempt = 0;
         this.stats.incrementTurns();
-
-      }, this.abortController!.signal, this.maxRetries - this.retryCount);
+        break;
+      }
 
     } catch (error: unknown) {
+      this._retryAttempt = 0;
       const isAbort = (error as Error)?.name === 'AbortError';
       if (!isAbort) {
         emitEvent({ type: 'error', message: `LLM error: ${extractErrorMessage(error)}` });
@@ -214,6 +239,7 @@ export class LLMClient {
       this.abortController = null;
     }
   }
+
 
   // ── Loop event → RPC event bridge ─────────────────────────────────────────
 
