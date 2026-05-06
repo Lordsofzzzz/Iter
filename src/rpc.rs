@@ -1,17 +1,19 @@
-//! RPC wire protocol types for TUI ↔ Agent communication.
+//! RPC wire protocol types for CLI ↔ Agent communication.
 //!
 //! The protocol uses JSONL (one JSON object per line) over stdout/stdin.
 //! Two message directions exist:
-//!   - **Push**: Agent → TUI (unprompted events like text deltas)
-//!   - **Pull**: TUI → Agent → TUI (request/response pattern)
+//!   - **Push**: Agent → CLI (unprompted events like text deltas)
+//!   - **Pull**: CLI → Agent → CLI (request/response pattern)
+
+#![allow(dead_code)]
 
 use serde::Deserialize;
 
 // ============================================================================
-// Push Events: Agent → TUI (unprompted)
+// Push Events: Agent → CLI (unprompted)
 // ============================================================================
 
-/// Unprompted events from the agent to the TUI.
+/// Unprompted events from the agent to the CLI.
 /// Identified by absence of the `kind` field.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -54,10 +56,10 @@ pub struct ModelEntry {
 }
 
 // ============================================================================
-// Pull Responses: TUI → Agent → TUI
+// Pull Responses: CLI → Agent → CLI
 // ============================================================================
 
-/// Response from the agent to a TUI command.
+/// Response from the agent to a CLI command.
 /// Always has `kind: "response"` which distinguishes it from push events.
 #[derive(Debug, Deserialize)]
 pub struct PullResponse {
@@ -109,7 +111,7 @@ pub struct ContextUsage {
     pub percent: f32,
 }
 
-/// Full session statistics for the UI.
+/// Full session statistics for the CLI.
 #[derive(Debug, Deserialize)]
 pub struct SessionStatsData {
     pub tokens:        TokenBreakdown,
@@ -145,7 +147,6 @@ pub fn parse_line(line: &str) -> AgentMessage {
     let envelope: RawEnvelope = match serde_json::from_str(line) {
         Ok(e)  => e,
         Err(_) => {
-            // eprintln!("[RPC PARSE ERROR] envelope: {e}");  // Disabled to prevent TUI corruption
             return AgentMessage::Unknown { raw: line.to_string() };
         }
     };
@@ -156,7 +157,6 @@ pub fn parse_line(line: &str) -> AgentMessage {
             match serde_json::from_str::<PullResponse>(line) {
                 Ok(r)  => AgentMessage::Pull(r),
                 Err(_) => {
-                    // eprintln!("[RPC PARSE ERROR] pull: {e}");  // Disabled to prevent TUI corruption
                     AgentMessage::Unknown {
                         raw: format!("pull-parse-err: {line}"),
                     }
@@ -178,7 +178,7 @@ pub fn parse_line(line: &str) -> AgentMessage {
     }
 }
 
-/// Internal TUI channel events.
+/// Internal CLI channel events.
 #[derive(Debug)]
 pub enum UiEvent {
     Agent(AgentMessage),
