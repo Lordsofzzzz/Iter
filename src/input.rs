@@ -70,6 +70,11 @@ impl InputBox {
             }
         }
 
+        // Restore default cursor style
+        let mut out = io::stderr();
+        out.queue(cursor::SetCursorStyle::DefaultUserShape)?;
+        out.flush()?;
+
         Ok(result)
     }
 
@@ -81,6 +86,8 @@ impl InputBox {
         out.queue(cursor::MoveUp(BOX_ROWS))?;
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(cursor::SavePosition)?;
+        out.queue(cursor::Show)?;
+        out.queue(cursor::SetCursorStyle::SteadyBlock)?;
         out.flush()?;
         self.draw()
     }
@@ -153,23 +160,20 @@ impl InputBox {
         out.queue(cursor::RestorePosition)?;
 
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
         out.queue(style::PrintStyledContent(
             border_line('╭', '╮', "", cols).with(Color::DarkGreen),
         ))?;
 
         out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
-        out.queue(style::PrintStyledContent("│ ".with(Color::DarkGreen)))?;
-        out.queue(style::PrintStyledContent(PROMPT.with(Color::Green)))?;
+        out.queue(style::PrintStyledContent("│ ".with(Color::DarkGreen)));
+        out.queue(style::PrintStyledContent(PROMPT.with(Color::Green)));
         out.queue(style::Print(&visible))?;
         out.queue(style::Print(" ".repeat(input_width.saturating_sub(visible_width))))?;
         out.queue(style::PrintStyledContent(" │".with(Color::DarkGreen)))?;
 
         out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
         out.queue(style::PrintStyledContent(
             border_line('╰', '╯', "", cols).with(Color::DarkGrey),
         ))?;
@@ -177,6 +181,7 @@ impl InputBox {
         out.queue(cursor::MoveUp(1))?;
         let cursor_x = (2 + prompt_width + cursor_col).min(cols.saturating_sub(1)) as u16;
         out.queue(cursor::MoveToColumn(cursor_x))?;
+        out.queue(cursor::Show)?;
         out.flush()
     }
 
@@ -191,14 +196,12 @@ impl InputBox {
         out.queue(cursor::RestorePosition)?;
 
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
         out.queue(style::PrintStyledContent(
             border_line('╭', '╮', "", cols).with(Color::DarkGrey),
         ))?;
 
         out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
         out.queue(style::PrintStyledContent("│ ".with(Color::DarkGrey)))?;
         out.queue(style::PrintStyledContent(PROMPT.with(Color::DarkGrey)))?;
         out.queue(style::PrintStyledContent(visible.with(Color::DarkGrey)))?;
@@ -207,7 +210,6 @@ impl InputBox {
 
         out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
         out.queue(style::PrintStyledContent(
             border_line('╰', '╯', "", cols).with(Color::DarkGrey),
         ))?;

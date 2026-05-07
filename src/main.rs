@@ -90,6 +90,7 @@ fn interactive_loop(
 
     loop {
         let hint = "describe your task...  (ctrl-k abort, ctrl-c quit)";
+        print_status_line(state);
         match input.read(hint)? {
             InputResult::Quit => {
                 eprintln!();
@@ -110,7 +111,6 @@ fn interactive_loop(
                 send_prompt(agent_stdin, &format!("prompt-{turn_id}"), prompt);
                 stream_response(rx, state, agent_stdin)?;
                 refresh_stats(rx, state, agent_stdin, turn_id);
-                print_turn_footer(state);
                 turn_id += 1;
             }
         }
@@ -327,12 +327,43 @@ fn print_status(msg: &str, color: Color) {
     println!("\n  {}", msg.with(color));
 }
 
-fn print_turn_footer(state: &State) {
+fn format_tokens(n: u32) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+fn print_status_line(state: &State) {
+    let ctx_color = if state.context_pct > 80.0 {
+        Color::DarkRed
+    } else if state.context_pct > 50.0 {
+        Color::DarkYellow
+    } else {
+        Color::DarkGreen
+    };
+
     println!(
-        "ctx {:.0}%  cost ${:.4}  turns {}",
+        "  {} {}  {} {}  {} {}  {} {}  {} {}/{} ({:.0}%)  {} ${:.4}  {} {}",
+        "in".with(Color::DarkGrey),
+        format_tokens(state.tokens_input).with(Color::White),
+        "out".with(Color::DarkGrey),
+        format_tokens(state.tokens_output).with(Color::White),
+        "cache↑".with(Color::DarkGrey),
+        format_tokens(state.tokens_cache_write).with(Color::DarkCyan),
+        "cache↓".with(Color::DarkGrey),
+        format_tokens(state.tokens_cache_read).with(Color::Cyan),
+        "ctx".with(Color::DarkGrey),
+        format_tokens(state.context_tokens).with(ctx_color),
+        format_tokens(state.model_limit).with(Color::DarkGrey),
         state.context_pct,
-        state.cost,
-        state.turns,
+        "cost".with(Color::DarkGrey),
+        format!("{:.4}", state.cost).with(Color::White),
+        "turn".with(Color::DarkGrey),
+        state.turns.to_string().with(Color::White),
     );
 }
 
