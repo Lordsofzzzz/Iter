@@ -106,7 +106,7 @@ fn interactive_loop(
                 print_status("aborted", Color::DarkYellow);
             }
             InputResult::Submit(prompt) => {
-                print_prompt_echo(&prompt);
+                let _ = io::stdout().flush();
                 send_prompt(agent_stdin, &format!("prompt-{turn_id}"), prompt);
                 stream_response(rx, state, agent_stdin)?;
                 refresh_stats(rx, state, agent_stdin, turn_id);
@@ -293,15 +293,6 @@ fn print_agent_header(state: &State) {
         ">".with(Color::DarkGreen),
         state.model_name.as_str().with(Color::DarkGrey),
     );
-}
-
-fn print_prompt_echo(prompt: &str) {
-    println!(
-        "\n{} {}",
-        ">".with(Color::DarkGreen).bold(),
-        prompt.with(Color::White).bold(),
-    );
-    println!();
 }
 
 fn print_tool_call(name: &str, input: &str) {
