@@ -329,13 +329,11 @@ fn print_status(msg: &str, color: Color) {
 
 fn print_turn_footer(state: &State) {
     println!(
-        "\n{}  ctx {:.0}%  cost ${:.4}  turns {}",
-        "-----------------------------------------".with(Color::DarkGrey),
+        "ctx {:.0}%  cost ${:.4}  turns {}",
         state.context_pct,
         state.cost,
         state.turns,
     );
-    println!();
 }
 
 fn truncate_chars(text: &str, max_chars: usize) -> String {
