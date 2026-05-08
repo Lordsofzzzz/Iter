@@ -65,7 +65,7 @@ impl InputBox {
                 // Clear the status line before locking
                 let mut out = io::stderr();
                 out.queue(cursor::RestorePosition)?;
-                out.queue(cursor::MoveDown(BOX_ROWS))?;
+                out.queue(cursor::MoveDown(BOX_ROWS + 1))?;
                 out.queue(cursor::MoveToColumn(0))?;
                 out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
                 out.flush()?;
@@ -271,7 +271,7 @@ fn reserve(&self, state: &State) -> io::Result<()> {
 
     fn move_below_box(&self) -> io::Result<()> {
         let mut out = io::stderr();
-        out.queue(cursor::MoveDown(2))?; // skip bottom border + status row
+        out.queue(cursor::MoveDown(1))?; // start output where status line was
         out.queue(cursor::MoveToColumn(0))?;
         out.flush()
     }
@@ -381,43 +381,6 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         self.buf[..self.cursor].chars().next_back().unwrap()
     }
 
-    fn draw_status_line(&self, state: &State) -> io::Result<()> {
-        let mut out = io::stderr();
-
-        out.queue(cursor::MoveDown(1))?;
-        out.queue(cursor::MoveToColumn(0))?;
-
-        let ctx_color = if state.context_pct > 80.0 {
-            Color::DarkRed
-        } else if state.context_pct > 50.0 {
-            Color::DarkYellow
-        } else {
-            Color::DarkGreen
-        };
-
-        write!(
-            out,
-            "  {} {}  {} {}  {} {}  {} {}  {} {}/{} ({:.0}%)  {} ${:.4}  {} {}",
-            "in".with(Color::DarkGrey),
-            format_tokens(state.tokens_input).with(Color::White),
-            "out".with(Color::DarkGrey),
-            format_tokens(state.tokens_output).with(Color::White),
-            "cache↑".with(Color::DarkGrey),
-            format_tokens(state.tokens_cache_write).with(Color::DarkCyan),
-            "cache↓".with(Color::DarkGrey),
-            format_tokens(state.tokens_cache_read).with(Color::Cyan),
-            "ctx".with(Color::DarkGrey),
-            format_tokens(state.context_tokens).with(ctx_color),
-            format_tokens(state.model_limit).with(Color::DarkGrey),
-            state.context_pct,
-            "cost".with(Color::DarkGrey),
-            format!("{:.4}", state.cost).with(Color::White),
-            "turn".with(Color::DarkGrey),
-            state.turns.to_string().with(Color::White),
-        )?;
-
-        out.flush()
-    }
 }
 
 fn format_tokens(n: u32) -> String {
