@@ -28,6 +28,7 @@ import { getConfig } from '../config.js';
 import { parseProviderError, isGenericRetryable } from './provider-error.js';
 import { streamAnthropic } from './stream-anthropic.js';
 import { streamGoogle } from './stream-google.js';
+import { streamLLM as streamLLMVercel } from './stream-vercel.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -73,11 +74,9 @@ export async function* streamLLM(
 
     case 'openai-completions':
     default:
-      yield* streamOpenRouter(model, context, {
+      yield* streamLLMVercel(model, context, {
         temperature: options.temperature,
-        apiKey,
         signal: options.signal,
-        baseUrl: provider.baseUrl,
       });
       return;
   }
