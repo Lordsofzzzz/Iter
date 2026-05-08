@@ -169,6 +169,7 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         let visible_width = UnicodeWidthStr::width(visible.as_str());
         let prompt_width = UnicodeWidthStr::width(PROMPT);
 
+        out.queue(cursor::Hide)?;
         out.queue(cursor::RestorePosition)?;
 
         out.queue(cursor::MoveToColumn(0))?;
