@@ -105,7 +105,6 @@ pub struct TokenBreakdown {
 /// Context window usage information.
 #[derive(Debug, Deserialize)]
 pub struct ContextUsage {
-    #[allow(dead_code)]
     pub tokens:  u32,
     pub limit:   u32,
     pub percent: f32,

@@ -96,9 +96,15 @@ pub fn apply_pull_response(state: &mut State, resp: rpc::PullResponse) {
         "get_session_stats" => {
             if let Some(data) = resp.data {
                 if let Ok(s) = serde_json::from_value::<rpc::SessionStatsData>(data) {
-                    state.context_pct = s.context_usage.percent;
-                    state.cost        = s.cost;
-                    state.turns       = s.turns;
+                    state.context_pct         = s.context_usage.percent;
+                    state.context_tokens  = s.context_usage.tokens;
+                    state.cost            = s.cost;
+                    state.turns           = s.turns;
+                    state.tokens_input    = s.tokens.input;
+                    state.tokens_output = s.tokens.output;
+                    state.tokens_cache_read  = s.tokens.cache_read;
+                    state.tokens_cache_write = s.tokens.cache_write;
+                    state.tokens_total   = s.tokens.total;
                 }
             }
         }

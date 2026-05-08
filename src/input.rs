@@ -14,6 +14,8 @@ use crossterm::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::state::State;
+
 const PROMPT: &str = "❯ ";
 const BOX_ROWS: u16 = 2;
 
@@ -51,15 +53,23 @@ impl InputBox {
         }
     }
 
-    pub fn read(&mut self, _hint: &str) -> io::Result<InputResult> {
+    pub fn read(&mut self, _hint: &str, state: &State) -> io::Result<InputResult> {
         let _raw = RawModeGuard::new()?;
 
-        self.reserve()?;
+        self.reserve(state)?;
 
-        let result = self.event_loop()?;
+        let result = self.event_loop(state)?;
 
         match &result {
             InputResult::Submit(_) => {
+                // Clear the status line before locking
+                let mut out = io::stderr();
+                out.queue(cursor::RestorePosition)?;
+                out.queue(cursor::MoveDown(BOX_ROWS))?;
+                out.queue(cursor::MoveToColumn(0))?;
+                out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+                out.flush()?;
+                
                 self.draw_locked()?;
                 self.move_below_box()?;
             }
@@ -78,21 +88,23 @@ impl InputBox {
         Ok(result)
     }
 
-    fn reserve(&self) -> io::Result<()> {
+fn reserve(&self, state: &State) -> io::Result<()> {
         let mut out = io::stderr();
-        for _ in 0..BOX_ROWS {
+        // Reserve an extra row for the status line
+        for _ in 0..(BOX_ROWS + 1) {
             out.queue(style::Print("\n"))?;
         }
-        out.queue(cursor::MoveUp(BOX_ROWS))?;
+        out.queue(cursor::MoveUp(BOX_ROWS + 1))?;
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(cursor::SavePosition)?;
         out.queue(cursor::Show)?;
         out.queue(cursor::SetCursorStyle::SteadyBlock)?;
         out.flush()?;
-        self.draw()
+        self.draw(Some(state))?;
+        Ok(())
     }
 
-    fn event_loop(&mut self) -> io::Result<InputResult> {
+    fn event_loop(&mut self, state: &State) -> io::Result<InputResult> {
         loop {
             match event::read()? {
                 Event::Key(KeyEvent { code, modifiers, .. }) => {
@@ -138,17 +150,17 @@ impl InputBox {
                         }
                         _ => {}
                     }
-                    self.draw()?;
+                    self.draw(Some(state))?;
                 }
                 Event::Resize(_, _) => {
-                    self.draw()?;
+                    self.draw(Some(state))?;
                 }
                 _ => {}
             }
         }
     }
 
-    fn draw(&self) -> io::Result<()> {
+    fn draw(&self, state: Option<&State>) -> io::Result<()> {
         let mut out = io::stderr();
         let cols = usize::from(terminal::size().unwrap_or((80, 24)).0).max(1);
         let content_width = cols.saturating_sub(4);
@@ -166,8 +178,8 @@ impl InputBox {
 
         out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(style::PrintStyledContent("│ ".with(Color::DarkGreen)));
-        out.queue(style::PrintStyledContent(PROMPT.with(Color::Green)));
+        out.queue(style::PrintStyledContent("│ ".with(Color::DarkGreen)))?;
+        out.queue(style::PrintStyledContent(PROMPT.with(Color::Green)))?;
         out.queue(style::Print(&visible))?;
         out.queue(style::Print(" ".repeat(input_width.saturating_sub(visible_width))))?;
         out.queue(style::PrintStyledContent(" │".with(Color::DarkGreen)))?;
@@ -178,11 +190,51 @@ impl InputBox {
             border_line('╰', '╯', "", cols).with(Color::DarkGrey),
         ))?;
 
+        if let Some(st) = state {
+            out.queue(cursor::MoveDown(1))?;
+            out.queue(cursor::MoveToColumn(0))?;
+            out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+            self.draw_status_line_internal(&mut out, st)?;
+            out.queue(cursor::MoveUp(1))?;
+        }
+
         out.queue(cursor::MoveUp(1))?;
         let cursor_x = (2 + prompt_width + cursor_col).min(cols.saturating_sub(1)) as u16;
         out.queue(cursor::MoveToColumn(cursor_x))?;
         out.queue(cursor::Show)?;
         out.flush()
+    }
+
+    fn draw_status_line_internal(&self, out: &mut std::io::Stderr, state: &State) -> io::Result<()> {
+        let ctx_color = if state.context_pct > 80.0 {
+            Color::DarkRed
+        } else if state.context_pct > 50.0 {
+            Color::DarkYellow
+        } else {
+            Color::DarkGreen
+        };
+
+        write!(
+            out,
+            "  {} {}  {} {}  {} {}  {} {}  {} {}/{} ({:.0}%)  {} ${:.4}  {} {}",
+            "in".with(Color::DarkGrey),
+            format_tokens(state.tokens_input).with(Color::White),
+            "out".with(Color::DarkGrey),
+            format_tokens(state.tokens_output).with(Color::White),
+            "cache↑".with(Color::DarkGrey),
+            format_tokens(state.tokens_cache_write).with(Color::DarkCyan),
+            "cache↓".with(Color::DarkGrey),
+            format_tokens(state.tokens_cache_read).with(Color::Cyan),
+            "ctx".with(Color::DarkGrey),
+            format_tokens(state.context_tokens).with(ctx_color),
+            format_tokens(state.model_limit).with(Color::DarkGrey),
+            state.context_pct,
+            "cost".with(Color::DarkGrey),
+            format!("{:.4}", state.cost).with(Color::White),
+            "turn".with(Color::DarkGrey),
+            state.turns.to_string().with(Color::White),
+        )?;
+        Ok(())
     }
 
     fn draw_locked(&self) -> io::Result<()> {
@@ -219,16 +271,16 @@ impl InputBox {
 
     fn move_below_box(&self) -> io::Result<()> {
         let mut out = io::stderr();
-        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveDown(2))?; // skip bottom border + status row
         out.queue(cursor::MoveToColumn(0))?;
-        out.queue(style::Print("\n"))?;
         out.flush()
     }
 
     fn erase(&self) -> io::Result<()> {
         let mut out = io::stderr();
         out.queue(cursor::RestorePosition)?;
-        for _ in 0..BOX_ROWS {
+        // We need to clear the box (2 rows) + the status line (1 row) = 3 rows
+        for _ in 0..(BOX_ROWS + 2) {
             out.queue(cursor::MoveToColumn(0))?;
             out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
             out.queue(cursor::MoveDown(1))?;
@@ -327,6 +379,54 @@ impl InputBox {
 
     fn char_before_cursor(&self) -> char {
         self.buf[..self.cursor].chars().next_back().unwrap()
+    }
+
+    fn draw_status_line(&self, state: &State) -> io::Result<()> {
+        let mut out = io::stderr();
+
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+
+        let ctx_color = if state.context_pct > 80.0 {
+            Color::DarkRed
+        } else if state.context_pct > 50.0 {
+            Color::DarkYellow
+        } else {
+            Color::DarkGreen
+        };
+
+        write!(
+            out,
+            "  {} {}  {} {}  {} {}  {} {}  {} {}/{} ({:.0}%)  {} ${:.4}  {} {}",
+            "in".with(Color::DarkGrey),
+            format_tokens(state.tokens_input).with(Color::White),
+            "out".with(Color::DarkGrey),
+            format_tokens(state.tokens_output).with(Color::White),
+            "cache↑".with(Color::DarkGrey),
+            format_tokens(state.tokens_cache_write).with(Color::DarkCyan),
+            "cache↓".with(Color::DarkGrey),
+            format_tokens(state.tokens_cache_read).with(Color::Cyan),
+            "ctx".with(Color::DarkGrey),
+            format_tokens(state.context_tokens).with(ctx_color),
+            format_tokens(state.model_limit).with(Color::DarkGrey),
+            state.context_pct,
+            "cost".with(Color::DarkGrey),
+            format!("{:.4}", state.cost).with(Color::White),
+            "turn".with(Color::DarkGrey),
+            state.turns.to_string().with(Color::White),
+        )?;
+
+        out.flush()
+    }
+}
+
+fn format_tokens(n: u32) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
     }
 }
 
