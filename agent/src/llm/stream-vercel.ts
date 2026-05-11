@@ -25,45 +25,41 @@ function toVercelMessages(messages: Message[]): any[] {
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: msg.content });
+      result.push({ role: 'user', content: [{ type: 'text', text: msg.content as string }] });
       continue;
     }
 
     if (msg.role === 'assistant') {
-      const parts: any[] = [];
-      const toolCalls: any[] = [];
+      const content: any[] = [];
 
       for (const part of msg.content) {
         if (part.type === 'text') {
-          parts.push({ type: 'text', text: part.text });
+          content.push({ type: 'text', text: part.text });
         } else if (part.type === 'thinking') {
           continue;
         } else if (part.type === 'toolCall') {
-          toolCalls.push({
-            id: part.id,
-            type: 'function',
-            function: { name: part.name, arguments: JSON.stringify(part.arguments) },
+          content.push({
+            type: 'tool-call',
+            toolCallId: part.id,
+            toolName: part.name,
+            input: part.arguments,
           });
         }
       }
 
-      const orMsg: any = { role: 'assistant' };
-      if (parts.length > 0) {
-        orMsg.content = parts.length === 1 && parts[0].type === 'text'
-          ? parts[0].text
-          : parts;
-      }
-      if (toolCalls.length > 0) orMsg.tool_calls = toolCalls;
-
-      result.push(orMsg);
+      result.push({ role: 'assistant', content });
       continue;
     }
 
     if (msg.role === 'toolResult') {
       result.push({
         role: 'tool',
-        tool_call_id: msg.toolCallId,
-        content: msg.content.map(c => c.text).join('\n'),
+        content: msg.content.map(c => ({
+          type: 'tool-result',
+          toolCallId: msg.toolCallId,
+          toolName: 'unknown',
+          output: { type: 'text', value: c.text },
+        })),
       });
     }
   }
@@ -117,7 +113,7 @@ export async function* streamLLM(
 ): AsyncIterable<AssistantMessageEvent> {
   const apiKey = process.env.OPENROUTER_API_KEY ?? '';
 
-  console.error(`[stream-vercel] model=${model}`);
+  console.error(`[stream-vercel] model=\${model}`);
 
   const provider = createOpenAICompatible({
     name: 'openrouter',
@@ -138,14 +134,13 @@ export async function* streamLLM(
   }
 
   const messages = toVercelMessages(context.messages);
-  if (context.systemPrompt) {
-    messages.unshift({ role: 'system', content: context.systemPrompt });
-  }
+  const system = context.systemPrompt;
 
   const result: any = streamText({
     model: wrappedModel,
     tools: context.tools.length > 0 ? vercelTools : undefined,
     temperature: options.temperature,
+    system,
     messages,
     stopWhen: (info: any) => {
       return info.stepCount >= 20;
@@ -162,8 +157,11 @@ export async function* streamLLM(
   let started = false;
   let textBuffer = '';
   let textIndex = -1;
+  let thinkingBuffer = '';
+  let thinkingIndex = -1;
+  let finishReasonFromStream: string | undefined;
 
-for await (const chunk of result.fullStream) {
+  for await (const chunk of result.fullStream) {
     switch (chunk.type) {
       case 'tool-input-start':
       case 'tool-input-delta':
@@ -209,6 +207,45 @@ for await (const chunk of result.fullStream) {
         yield { type: 'toolcall_end', contentIndex: idx, toolCall, partial: { ...partial } };
         break;
       }
+      case 'reasoning-start': {
+        if (!started) {
+          started = true;
+          yield { type: 'start', partial: { ...partial } };
+        }
+        thinkingIndex = partial.content.length;
+        partial.content.push({ type: 'thinking', thinking: '' });
+        yield { type: 'thinking_start', contentIndex: thinkingIndex, partial: { ...partial } };
+        break;
+      }
+      case 'reasoning-delta': {
+        if (!started) {
+          started = true;
+          yield { type: 'start', partial: { ...partial } };
+        }
+        const delta = typeof chunk.delta === 'string'
+          ? chunk.delta
+          : (typeof (chunk as any).text === 'string' ? (chunk as any).text : '');
+        if (!delta) break;
+        const ti = thinkingIndex >= 0 ? thinkingIndex : findLastIndex(partial.content, (c: any) => c.type === 'thinking');
+        if (ti >= 0) {
+          thinkingBuffer += delta;
+          (partial.content[ti] as any).thinking = thinkingBuffer;
+          yield { type: 'thinking_delta', contentIndex: ti, delta, partial: { ...partial } };
+        }
+        break;
+      }
+      case 'reasoning-end': {
+        const ti = thinkingIndex >= 0 ? thinkingIndex : findLastIndex(partial.content, (c: any) => c.type === 'thinking');
+        if (ti >= 0) {
+          thinkingBuffer = (partial.content[ti] as any).thinking;
+          yield { type: 'thinking_end', contentIndex: ti, content: thinkingBuffer, partial: { ...partial } };
+        }
+        break;
+      }
+      case 'finish': {
+        finishReasonFromStream = chunk.finishReason ?? finishReasonFromStream;
+        break;
+      }
       case 'error': {
         partial.stopReason = 'error';
         partial.errorMessage = chunk.error?.message ?? 'Stream error';
@@ -220,7 +257,7 @@ for await (const chunk of result.fullStream) {
 
   const response: any = await result.response;
   const usageResult: any = await result.usage;
-  const finishReason: any = await result.finishReason;
+  const finishReason: any = finishReasonFromStream ?? await result.finishReason;
 
   if (usageResult?.inputTokens || usageResult?.outputTokens) {
     partial.usage = {
