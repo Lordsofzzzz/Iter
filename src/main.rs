@@ -5,6 +5,7 @@
 
 mod agent;
 mod cli;
+mod highlight;
 mod input;
 mod rpc;
 mod state;
@@ -133,6 +134,99 @@ fn send_prompt(
     );
 }
 
+/// What `handle_push_event` wants the event loop to do next.
+enum LoopAction {
+    /// Keep receiving events.
+    Continue,
+    /// Agent turn finished — render the buffered response and return.
+    Done,
+    /// Unrecoverable error — propagate immediately.
+    Error(io::Error),
+}
+
+/// Handle a single push event, updating `state` and `response_buf` as needed.
+///
+/// All rendering decisions live here; `stream_response` is just a loop.
+fn handle_push_event(
+    event: PushEvent,
+    state: &mut State,
+    response_buf: &mut String,
+    stdout: &mut impl Write,
+) -> io::Result<LoopAction> {
+    match event {
+        PushEvent::TextDelta { delta } => {
+            response_buf.push_str(&delta);
+        }
+        PushEvent::ThinkingDelta { delta } => {
+            if state.show_thinking {
+                crossterm::queue!(
+                    stdout,
+                    style::PrintStyledContent(delta.with(Color::DarkGrey))
+                )?;
+                stdout.flush()?;
+            }
+        }
+        PushEvent::ToolCall { name, input } => {
+            state.pending_tool_call = Some((name.clone(), input.clone()));
+            state.tool_calls += 1;
+            print_tool_call(&name, &input);
+        }
+        PushEvent::ToolResult { name, output } => {
+            state.pending_tool_call = None;
+            print_tool_result(&name, &output);
+        }
+        PushEvent::ToolUpdate { .. } => {}
+        PushEvent::Cooldown { wait_ms, retries_left } => {
+            let secs = (wait_ms + 999) / 1000;
+            print_status(
+                &format!("rate limited: waiting {secs}s ({retries_left} retries left)"),
+                Color::DarkYellow,
+            );
+        }
+        PushEvent::RetryResult { success, attempt } => {
+            if !success {
+                print_status(&format!("retry attempt {attempt} failed"), Color::DarkRed);
+            }
+        }
+        PushEvent::AutoRetryStart { attempt, max_attempts, delay_ms, .. } => {
+            print_status(
+                &format!("retry {attempt}/{max_attempts} in {delay_ms}ms"),
+                Color::DarkYellow,
+            );
+        }
+        PushEvent::AutoRetryEnd { success, attempt, final_error } => {
+            if !success {
+                print_status(
+                    &format!(
+                        "failed after {attempt} attempts: {}",
+                        final_error.unwrap_or_else(|| "unknown".into())
+                    ),
+                    Color::DarkRed,
+                );
+            }
+        }
+        PushEvent::Error { message } => {
+            print_status(&format!("error: {message}"), Color::DarkRed);
+            return Ok(LoopAction::Error(io::Error::new(
+                io::ErrorKind::Other,
+                message,
+            )));
+        }
+        PushEvent::ModelList { models } => {
+            state.models = models.into_iter().map(|m| (m.id, m.name)).collect();
+        }
+        PushEvent::AgentEnd => {
+            if !response_buf.is_empty() {
+                print_response(response_buf);
+            }
+            println!();
+            return Ok(LoopAction::Done);
+        }
+        PushEvent::AgentStart | PushEvent::TurnStart | PushEvent::TurnEnd => {}
+    }
+    Ok(LoopAction::Continue)
+}
+
 fn stream_response(
     rx: &Receiver<UiEvent>,
     state: &mut State,
@@ -143,83 +237,13 @@ fn stream_response(
 
     loop {
         match rx.recv() {
-            Ok(UiEvent::Agent(AgentMessage::Push(event))) => match event {
-                PushEvent::TextDelta { delta } => {
-                    response_buf.push_str(&delta);
+            Ok(UiEvent::Agent(AgentMessage::Push(event))) => {
+                match handle_push_event(event, state, &mut response_buf, &mut stdout)? {
+                    LoopAction::Continue => {}
+                    LoopAction::Done => return Ok(()),
+                    LoopAction::Error(e) => return Err(e),
                 }
-                PushEvent::ThinkingDelta { delta } => {
-                    if state.show_thinking {
-                        crossterm::queue!(
-                            stdout,
-                            style::PrintStyledContent(delta.with(Color::DarkGrey))
-                        )?;
-                        stdout.flush()?;
-                    }
-                }
-                PushEvent::ToolCall { name, input } => {
-                    state.pending_tool_call = Some((name.clone(), input.clone()));
-                    state.tool_calls += 1;
-                    print_tool_call(&name, &input);
-                }
-                PushEvent::ToolResult { name, output } => {
-                    state.pending_tool_call = None;
-                    print_tool_result(&name, &output);
-                }
-                PushEvent::ToolUpdate { .. } => {}
-                PushEvent::Cooldown { wait_ms, retries_left } => {
-                    let secs = (wait_ms + 999) / 1000;
-                    print_status(
-                        &format!("rate limited: waiting {secs}s ({retries_left} retries left)"),
-                        Color::DarkYellow,
-                    );
-                }
-                PushEvent::RetryResult { success, attempt } => {
-                    if !success {
-                        print_status(&format!("retry attempt {attempt} failed"), Color::DarkRed);
-                    }
-                }
-                PushEvent::AutoRetryStart {
-                    attempt,
-                    max_attempts,
-                    delay_ms,
-                    ..
-                } => {
-                    print_status(
-                        &format!("retry {attempt}/{max_attempts} in {delay_ms}ms"),
-                        Color::DarkYellow,
-                    );
-                }
-                PushEvent::AutoRetryEnd {
-                    success,
-                    attempt,
-                    final_error,
-                } => {
-                    if !success {
-                        print_status(
-                            &format!(
-                                "failed after {attempt} attempts: {}",
-                                final_error.unwrap_or_else(|| "unknown".into())
-                            ),
-                            Color::DarkRed,
-                        );
-                    }
-                }
-                PushEvent::Error { message } => {
-                    print_status(&format!("error: {message}"), Color::DarkRed);
-                    return Ok(());
-                }
-                PushEvent::ModelList { models } => {
-                    state.models = models.into_iter().map(|m| (m.id, m.name)).collect();
-                }
-                PushEvent::AgentEnd => {
-                    if !response_buf.is_empty() {
-                        termimad::print_text(&response_buf);
-                    }
-                    println!();
-                    return Ok(());
-                }
-                PushEvent::AgentStart | PushEvent::TurnStart | PushEvent::TurnEnd => {}
-            },
+            }
             Ok(UiEvent::Agent(AgentMessage::Pull(response))) => {
                 agent::apply_pull_response(state, response);
             }
@@ -336,5 +360,62 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
         format!("{preview}...")
     } else {
         preview
+    }
+}
+
+/// Render a complete LLM response.
+///
+/// Splits on fenced code blocks:
+/// - Markdown segments  → termimad (headings, bold, lists, etc.)
+/// - Code block content → syntect  (syntax-highlighted, printed directly)
+fn print_response(text: &str) {
+    let mut md_buf = String::new();
+    let mut lines = text.split('\n').peekable();
+
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("```") {
+            // Flush accumulated markdown first.
+            if !md_buf.is_empty() {
+                termimad::print_text(md_buf.trim_end_matches('\n'));
+                md_buf.clear();
+            }
+
+            let lang = trimmed.trim_start_matches('`').trim();
+
+            // Print the opening fence in dim style.
+            println!("\x1b[2m{line}\x1b[0m");
+
+            // Collect and highlight code body.
+            let mut body = String::new();
+            let mut closed = false;
+            for inner in lines.by_ref() {
+                if inner.trim_start().starts_with("```") {
+                    // Print highlighted body.
+                    let highlighted = highlight::highlight_code(lang, &body);
+                    print!("{highlighted}");
+                    // Print closing fence in dim style.
+                    println!("\x1b[2m{inner}\x1b[0m");
+                    closed = true;
+                    break;
+                }
+                body.push_str(inner);
+                body.push('\n');
+            }
+
+            if !closed {
+                // Unclosed fence — print body plain.
+                print!("{body}");
+            }
+        } else {
+            md_buf.push_str(line);
+            md_buf.push('\n');
+        }
+    }
+
+    // Flush any remaining markdown.
+    if !md_buf.is_empty() {
+        termimad::print_text(md_buf.trim_end_matches('\n'));
     }
 }
