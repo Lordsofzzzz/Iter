@@ -7,7 +7,7 @@
  */
 
 import { emitEvent, SessionStatsData } from '../rpc.js';
-import { getRetryConfig, isRetryEnabled } from '../config.js';
+import { getRetryConfig, isRetryEnabled, getTemperature } from '../config.js';
 import { isGenericRetryable } from './provider-error.js';
 import { Stats } from './stats.js';
 import { runAgentLoop }                 from './agent-loop.js';
@@ -19,7 +19,7 @@ import { transformContext } from './context.js';
 // ── Config ────────────────────────────────────────────────────────────────────
 
 export let MODEL_NAME = process.env.MODEL_NAME ?? 'minimax/minimax-m2.5:free';
-export const MODEL_TEMP = 0.3;
+export const MODEL_TEMP = getTemperature();
 
 const FALLBACK_LIMIT = 128_000;
 

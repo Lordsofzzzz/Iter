@@ -10,8 +10,7 @@
     "@ai-sdk/openai": "^0.0.14",
     "@ai-sdk/openai-compatible": "^2.0.47",
     "@openrouter/ai-sdk-provider": "^1.0.0",
-    "ai": "^5.0.0",
-    "openai": "^4.0.0"
+    "ai": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
