@@ -3,7 +3,7 @@
  * Uses @ai-sdk-tool/parser middleware for XML tool calls (MiniMax).
  */
 
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { streamText, tool, wrapLanguageModel } from 'ai';
 import { morphXmlToolMiddleware } from '@ai-sdk-tool/parser';
 import { z } from 'zod';
@@ -17,8 +17,6 @@ import type {
   ToolCall,
   Usage,
 } from './types.js';
-
-const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
 function toVercelMessages(messages: Message[]): any[] {
   const result: any[] = [];
@@ -115,13 +113,9 @@ export async function* streamLLM(
 
   console.error(`[stream-vercel] model=${model}`);
 
-  const provider = createOpenAICompatible({
-    name: 'openrouter',
-    apiKey,
-    baseURL: OPENROUTER_BASE,
-  });
+  const provider = createOpenRouter({ apiKey });
 
-  const baseModel: any = provider(model);
+  const baseModel: any = provider.chat(model);
 
   const wrappedModel: any = wrapLanguageModel({
     model: baseModel,
