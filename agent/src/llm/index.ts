@@ -6,9 +6,8 @@
 
 import { LLMClient } from './client.js';
 export { LLMClient, MODEL_NAME, MODEL_TEMP, getModelLimit, fetchModelLimits, setModel } from './client.js';
-export { History } from './history.js';
 export { Stats, type SessionStats } from './stats.js';
-export { streamLLM, streamOpenRouter } from './stream.js';
+export { streamLLM } from './stream.js';
 export { parseProviderError, isGenericRetryable, isContextOverflow, type ProviderError } from './provider-error.js';
 
 /**
