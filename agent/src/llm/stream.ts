@@ -349,16 +349,16 @@ export async function* streamOpenRouter(
     params.tool_choice = 'auto';
   }
 
+  // Always send explicit reasoning effort — without it OpenRouter defaults to max.
   const isThinkingModel =
     model.includes(':thinking') ||
+    model.includes('minimax')   ||
     model.includes('deepseek-r') ||
     model.includes('qwq')        ||
     model.includes('r1')         ||
     model.includes('reasoning');
 
-  if (isThinkingModel) {
-    params.reasoning = { effort: 'medium' };
-  }
+  params.reasoning = { effort: isThinkingModel ? 'medium' : 'none' };
 
   // ── Stream state ─────────────────────────────────────────────────────────────
   const partial = blankPartial();
