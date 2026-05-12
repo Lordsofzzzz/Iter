@@ -21,7 +21,7 @@ function toVercelMessages(messages: Message[]): any[] {
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      result.push({ role: 'user', content: [{ type: 'text', text: msg.content as string }] });
+      result.push({ role: 'user', content: msg.content });
       continue;
     }
 
@@ -63,7 +63,11 @@ function toVercelMessages(messages: Message[]): any[] {
   return result;
 }
 
+const toolCache = new Map<string, any>();
+
 function agentToolToVercel(t: AgentTool): any {
+  if (toolCache.has(t.name)) return toolCache.get(t.name);
+
   const paramProps: Record<string, any> = {};
   const props = t.parameters.properties;
 
@@ -95,10 +99,12 @@ function agentToolToVercel(t: AgentTool): any {
     }
   }
 
-  return tool({
+  const vTool = tool({
     description: t.description,
     inputSchema: z.object(paramProps),
   });
+  toolCache.set(t.name, vTool);
+  return vTool;
 }
 
 function emptyUsage(): Usage {
@@ -135,12 +141,14 @@ export async function* streamLLM(
     temperature: options.temperature,
     system,
     messages,
+    abortSignal: options.signal,
     providerOptions: {
       openrouter: {
         reasoning: { effort: 'medium' },
       },
     },
     stopWhen: (info: any) => {
+      if (options.signal?.aborted) return true;
       return info.stepCount >= 20;
     },
   });
