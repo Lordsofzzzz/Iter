@@ -74,6 +74,12 @@ function agentToolToVercel(t: AgentTool): any {
       zodType = z.string();
     } else if (prop.type === 'number') {
       zodType = z.number();
+    } else if (prop.type === 'boolean') {
+      zodType = z.boolean();
+    } else if (prop.type === 'array') {
+      zodType = z.array(z.any());
+    } else if (prop.type === 'object') {
+      zodType = z.record(z.any());
     } else {
       zodType = z.any();
     }

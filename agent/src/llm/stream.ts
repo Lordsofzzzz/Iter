@@ -35,7 +35,7 @@ export async function* streamLLM(
   const provider = inferProvider(model);
   const apiKey = resolveApiKey(provider);
 
-  console.error(`[stream] provider=${provider.id} api=${provider.apiType} model=${model}`);
+  // console.error(`[stream] provider=${provider.id} api=${provider.apiType} model=${model}`);
 
   switch (provider.apiType) {
     case 'anthropic-messages':
