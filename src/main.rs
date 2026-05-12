@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use crossterm::style::{self, Color, Stylize};
+use crossterm::style::{self, Attribute, Color, Stylize};
 
 use cli::{Cli, Command};
 use input::{InputBox, InputResult};
@@ -161,7 +161,9 @@ fn handle_push_event(
             if state.show_thinking {
                 crossterm::queue!(
                     stdout,
-                    style::PrintStyledContent(delta.with(Color::DarkGrey))
+                    style::PrintStyledContent(
+                        delta.with(Color::DarkGrey).attribute(Attribute::Italic)
+                    )
                 )?;
                 stdout.flush()?;
             }

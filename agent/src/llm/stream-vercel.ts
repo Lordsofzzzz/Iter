@@ -113,7 +113,7 @@ export async function* streamLLM(
 ): AsyncIterable<AssistantMessageEvent> {
   const apiKey = process.env.OPENROUTER_API_KEY ?? '';
 
-  console.error(`[stream-vercel] model=\${model}`);
+  console.error(`[stream-vercel] model=${model}`);
 
   const provider = createOpenAICompatible({
     name: 'openrouter',

@@ -28,7 +28,7 @@ pub struct GlobalOptions {
     pub workdir: Option<PathBuf>,
 
     /// Print model thinking deltas when the backend emits them.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, default_value_t = true)]
     pub show_thinking: bool,
 
     /// TypeScript agent entry point.
