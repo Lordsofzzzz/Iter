@@ -14,3 +14,4 @@ serde_json    = "1"
 crossterm     = "0.29"
 unicode-width = "0.2"
 termimad      = "0.34"
+syntect       = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
