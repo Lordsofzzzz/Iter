@@ -142,6 +142,11 @@ export async function* streamLLM(
     temperature: options.temperature,
     system,
     messages,
+    providerOptions: {
+      openrouter: {
+        reasoning: { effort: 'medium' },
+      },
+    },
     stopWhen: (info: any) => {
       return info.stepCount >= 20;
     },
@@ -279,4 +284,4 @@ function findLastIndex<T>(arr: T[], predicate: (val: T) => boolean): number {
     if (predicate(arr[i])) return i;
   }
   return -1;
-}
+} 
