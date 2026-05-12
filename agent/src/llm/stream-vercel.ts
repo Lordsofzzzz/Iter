@@ -1,11 +1,9 @@
 /**
  * Vercel AI SDK streaming layer for OpenRouter.
- * Uses @ai-sdk-tool/parser middleware for XML tool calls (MiniMax).
  */
 
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { streamText, tool, wrapLanguageModel } from 'ai';
-import { morphXmlToolMiddleware } from '@ai-sdk-tool/parser';
+import { streamText, tool } from 'ai';
 import { z } from 'zod';
 import type {
   AgentContext,
@@ -117,11 +115,6 @@ export async function* streamLLM(
 
   const baseModel: any = provider.chat(model);
 
-  const wrappedModel: any = wrapLanguageModel({
-    model: baseModel,
-    middleware: morphXmlToolMiddleware as any,
-  });
-
   const vercelTools: Record<string, any> = {};
   for (const t of context.tools) {
     vercelTools[t.name] = agentToolToVercel(t);
@@ -131,7 +124,7 @@ export async function* streamLLM(
   const system = context.systemPrompt;
 
   const result: any = streamText({
-    model: wrappedModel,
+    model: baseModel,
     tools: context.tools.length > 0 ? vercelTools : undefined,
     temperature: options.temperature,
     system,
@@ -260,11 +253,11 @@ export async function* streamLLM(
 
   if (usageResult?.inputTokens || usageResult?.outputTokens) {
     partial.usage = {
-      input: usageResult.inputTokens?.total ?? 0,
-      output: usageResult.outputTokens?.total ?? 0,
-      cacheRead: usageResult.inputTokens?.cacheRead ?? 0,
-      cacheWrite: usageResult.inputTokens?.cacheWrite ?? 0,
-      totalTokens: (usageResult.inputTokens?.total ?? 0) + (usageResult.outputTokens?.total ?? 0),
+      input:      usageResult.inputTokens       ?? 0,
+      output:     usageResult.outputTokens      ?? 0,
+      cacheRead:  usageResult.cachedInputTokens ?? 0,
+      cacheWrite: 0,
+      totalTokens: (usageResult.inputTokens ?? 0) + (usageResult.outputTokens ?? 0),
     };
   }
 
