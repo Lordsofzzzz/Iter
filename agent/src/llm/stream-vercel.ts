@@ -53,7 +53,7 @@ function toVercelMessages(messages: Message[]): any[] {
         content: msg.content.map(c => ({
           type: 'tool-result',
           toolCallId: msg.toolCallId,
-          toolName: 'unknown',
+          toolName: (msg as any).toolName || 'unknown',
           output: { type: 'text', value: c.text },
         })),
       });
@@ -247,7 +247,6 @@ export async function* streamLLM(
     }
   }
 
-  const response: any = await result.response;
   const usageResult: any = await result.usage;
   const finishReason: any = finishReasonFromStream ?? await result.finishReason;
 
