@@ -139,13 +139,13 @@ fn stream_response(
     _agent_stdin: &mut Option<std::process::ChildStdin>,
 ) -> io::Result<()> {
     let mut stdout = io::stdout();
+    let mut response_buf = String::new();
 
     loop {
         match rx.recv() {
             Ok(UiEvent::Agent(AgentMessage::Push(event))) => match event {
                 PushEvent::TextDelta { delta } => {
-                    print!("{delta}");
-                    stdout.flush()?;
+                    response_buf.push_str(&delta);
                 }
                 PushEvent::ThinkingDelta { delta } => {
                     if state.show_thinking {
@@ -212,6 +212,9 @@ fn stream_response(
                     state.models = models.into_iter().map(|m| (m.id, m.name)).collect();
                 }
                 PushEvent::AgentEnd => {
+                    if !response_buf.is_empty() {
+                        termimad::print_text(&response_buf);
+                    }
                     println!();
                     return Ok(());
                 }
