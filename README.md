@@ -79,7 +79,7 @@ Push events from the agent include:
 - `tool_call`, `tool_result`, `tool_update`
 - `error`
 - `cooldown`, `retry_result`, `auto_retry_start`, `auto_retry_end`
-- `model_list`
+
 
 Pull responses from the agent include:
 

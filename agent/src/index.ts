@@ -5,7 +5,7 @@
  * Communicates with the Rust TUI via JSONL over stdin/stdout.
  */
 
-import { LLMClient, MODEL_NAME, getModelLimit, fetchModelLimits, clearHistory, setModel } from './llm/index.js';
+import { LLMClient, MODEL_NAME, getModelLimit, clearHistory, setModel } from './llm/index.js';
 import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
 import { logToFile } from './utils/logger.js';
 
@@ -32,16 +32,6 @@ let currentModel = MODEL_NAME;
 // ============================================================================
 // Initialization
 // ============================================================================
-
-// Fetch context window limits from models.dev, then push model list to TUI.
-fetchModelLimits().then(models => {
-  console.error('[startup] model_list:', models.length, 'models');
-  if (models.length > 0) {
-    emitEvent({ type: 'model_list', models });
-  }
-}).catch(e => {
-  console.error('[startup] model_list fetch failed:', e);
-});
 
 // Notify TUI that agent has started.
 emitEvent({ type: 'agent_start' });

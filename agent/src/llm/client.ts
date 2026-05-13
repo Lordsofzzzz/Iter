@@ -37,52 +37,6 @@ export function setModel(model: string): void {
   _activeModelLimit = _contextWindowMap.get(model) ?? FALLBACK_LIMIT;
 }
 
-const MODELS_DEV_URL = 'https://models.dev/api.json';
-const MAX_SANE_CONTEXT = 1_000_000; // cap against bad data (models.dev issue #2531)
-
-/** Fetch model list from models.dev and populate context window map. */
-export async function fetchModelLimits(): Promise<Array<{ id: string; name: string }>> {
-  console.error('[models] fetching', MODELS_DEV_URL);
-  try {
-    const res = await fetch(MODELS_DEV_URL, {
-      headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return [];
-
-    // models.dev/api.json structure: { "provider": { models: { "model-id": { name, tool_call, limit: { context } } } } }
-    const data = await res.json() as Record<string, {
-      models?: Record<string, {
-        name?:      string;
-        tool_call?: boolean;
-        limit?:     { context?: number; output?: number };
-      }>;
-    }>;
-
-    const models: Array<{ id: string; name: string }> = [];
-    for (const [_provider, providerData] of Object.entries(data)) {
-      if (!providerData?.models) continue;
-      for (const [id, info] of Object.entries(providerData.models)) {
-        if (!info || typeof info !== 'object') continue;
-        // Only include tool-capable models
-        if (!info.tool_call) continue;
-        const ctx = info.limit?.context;
-        if (ctx && ctx > 0) {
-          _contextWindowMap.set(id, Math.min(ctx, MAX_SANE_CONTEXT));
-        }
-        models.push({ id, name: info.name ?? id });
-      }
-    }
-
-    _activeModelLimit = _contextWindowMap.get(_activeModel) ?? FALLBACK_LIMIT;
-    console.error('[models] loaded', models.length, 'tool-capable models');
-    return models;
-  } catch (e) {
-    console.error('[models] fetch error:', e);
-    return [];
-  }
-}
-
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class LLMClient {
