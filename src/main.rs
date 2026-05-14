@@ -39,7 +39,16 @@ fn main() -> io::Result<()> {
                 let key = prompt_api_key_if_needed(p);
                 (Some(p.clone()), Some(m.clone()), key)
             }
-            _ => pick_provider_model_interactive()?,
+            (Some(p), None) => {
+                let key = prompt_api_key_if_needed(p);
+                (Some(p.clone()), None, key)
+            }
+            (None, Some(m)) => {
+                let provider = infer_provider_from_model(m);
+                let key = provider.as_deref().and_then(|p| prompt_api_key_if_needed(p));
+                (provider, Some(m.clone()), key)
+            }
+            (None, None) => pick_provider_model_interactive()?,
         };
 
     let (tx, rx) = mpsc::channel::<UiEvent>();
@@ -558,6 +567,20 @@ fn prompt_api_key_if_needed(provider_id: &str) -> Option<String> {
         std::env::set_var(env_var, &key);
         Some(key)
     }
+}
+
+/// Infer provider ID from model name prefix (mirrors provider.ts inferProvider).
+fn infer_provider_from_model(model: &str) -> Option<String> {
+    if model.starts_with("claude-") { return Some("anthropic".into()); }
+    if model.starts_with("gpt-") || model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4") {
+        return Some("openai".into());
+    }
+    if model.starts_with("gemini-") { return Some("google".into()); }
+    if model.starts_with("deepseek-") { return Some("deepseek".into()); }
+    if model.starts_with("llama") || model.starts_with("mixtral") { return Some("groq".into()); }
+    if model.starts_with("mistral-") { return Some("mistral".into()); }
+    if model.contains('/') { return Some("openrouter".into()); }
+    None
 }
 
 /// Read a line from stdin without echoing characters (masked password input).
