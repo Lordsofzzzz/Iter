@@ -32,10 +32,22 @@ fn main() -> io::Result<()> {
     let mut state = State::new();
     state.show_thinking = cli.global.show_thinking;
 
+    // Resolve provider + model + API key BEFORE spawning agent so we can inject env vars.
+    let (resolved_provider, resolved_model, resolved_api_key) =
+        match (&cli.global.provider, &cli.global.model) {
+            (Some(p), Some(m)) => {
+                let key = prompt_api_key_if_needed(p);
+                (Some(p.clone()), Some(m.clone()), key)
+            }
+            _ => pick_provider_model_interactive()?,
+        };
+
     let (tx, rx) = mpsc::channel::<UiEvent>();
     let config = agent::AgentConfig {
-        entry_path: cli.global.agent_entry.clone(),
-        log_dir: cli.global.log_dir.clone(),
+        entry_path:  cli.global.agent_entry.clone(),
+        log_dir:     cli.global.log_dir.clone(),
+        api_key:     resolved_api_key,
+        provider_id: resolved_provider.clone(),
     };
     let mut agent_stdin = agent::spawn_agent(tx, &config);
 
@@ -51,14 +63,6 @@ fn main() -> io::Result<()> {
         }),
     );
     drain_startup(&rx, &mut state, &mut agent_stdin);
-
-    // Resolve provider + model: flags > interactive picker > env defaults.
-    let (resolved_provider, resolved_model) = match (&cli.global.provider, &cli.global.model) {
-        (Some(p), Some(m)) => (Some(p.clone()), Some(m.clone())),
-        (Some(p), None) => (Some(p.clone()), None),
-        (None, Some(m)) => (None, Some(m.clone())),
-        (None, None) => pick_provider_model_interactive()?,
-    };
 
     if let Some(provider) = &resolved_provider {
         agent::send_cmd(
@@ -442,9 +446,9 @@ fn print_response(text: &str) {
     }
 }
 
-/// Interactive startup picker: select vendor then model.
-/// Returns (provider, model) — both optional (Enter skips to env defaults).
-fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<String>)> {
+/// Interactive startup picker: select vendor, model, and API key.
+/// Returns (provider, model, api_key).
+fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<String>, Option<String>)> {
     let providers: &[(&str, &str, &[&str])] = &[
         ("anthropic",  "Anthropic",  &["claude-sonnet-4-20250514", "claude-opus-4-5-20250514", "claude-haiku-3-5-20250514"]),
         ("openai",     "OpenAI",     &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"]),
@@ -456,7 +460,6 @@ fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<Strin
         ("ollama",     "Ollama",     &["llama3", "mistral", "codellama"]),
     ];
 
-    // --- Vendor picker ---
     println!("\n{}", "Select vendor:".with(Color::DarkCyan).bold());
     for (i, (id, name, _)) in providers.iter().enumerate() {
         println!("  {}  {} {}", format!("[{i}]").with(Color::DarkGrey), name.with(Color::White), id.with(Color::DarkGrey));
@@ -470,7 +473,7 @@ fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<Strin
     let input = input.trim();
 
     if input.is_empty() {
-        return Ok((None, None));
+        return Ok((None, None, None));
     }
 
     let provider_entry = input.parse::<usize>()
@@ -480,10 +483,9 @@ fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<Strin
 
     let Some((provider_id, provider_name, models)) = provider_entry else {
         println!("  {} unknown vendor '{}', using env defaults", "!".with(Color::DarkYellow), input);
-        return Ok((None, None));
+        return Ok((None, None, None));
     };
 
-    // --- Model picker ---
     println!("\n{} {}:", "Select model for".with(Color::DarkCyan).bold(), provider_name.with(Color::White));
     for (i, m) in models.iter().enumerate() {
         println!("  {}  {}", format!("[{i}]").with(Color::DarkGrey), m.with(Color::White));
@@ -511,5 +513,78 @@ fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<Strin
         model.as_str().with(Color::White).bold(),
     );
 
-    Ok((Some(provider_id.to_string()), Some(model)))
+    let api_key = prompt_api_key_if_needed(provider_id);
+
+    Ok((Some(provider_id.to_string()), Some(model), api_key))
+}
+
+/// Check if the provider already has a key in env; if not, prompt for it (masked).
+fn prompt_api_key_if_needed(provider_id: &str) -> Option<String> {
+    if provider_id == "ollama" {
+        return None;
+    }
+
+    let env_var = match provider_id {
+        "anthropic"  => "ANTHROPIC_API_KEY",
+        "openai"     => "OPENAI_API_KEY",
+        "google"     => "GOOGLE_API_KEY",
+        "deepseek"   => "DEEPSEEK_API_KEY",
+        "groq"       => "GROQ_API_KEY",
+        "mistral"    => "MISTRAL_API_KEY",
+        "openrouter" => "OPENROUTER_API_KEY",
+        _            => return None,
+    };
+
+    if let Ok(v) = std::env::var(env_var) {
+        if !v.is_empty() {
+            return None;
+        }
+    }
+
+    print!("  {} {} {}: ",
+        "API key".with(Color::DarkCyan),
+        format!("({env_var})").with(Color::DarkGrey),
+        "[Enter to skip]".with(Color::DarkGrey),
+    );
+    let _ = io::stdout().flush();
+
+    let key = read_masked_line().unwrap_or_default();
+    println!();
+
+    if key.is_empty() {
+        println!("  {} no key entered — make sure {} is set\n", "!".with(Color::DarkYellow), env_var);
+        None
+    } else {
+        std::env::set_var(env_var, &key);
+        Some(key)
+    }
+}
+
+/// Read a line from stdin without echoing characters (masked password input).
+fn read_masked_line() -> io::Result<String> {
+    use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::terminal;
+
+    terminal::enable_raw_mode()?;
+    let mut buf = String::new();
+
+    loop {
+        match event::read()? {
+            Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => break,
+            Event::Key(KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. }) => {
+                terminal::disable_raw_mode()?;
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "ctrl-c"));
+            }
+            Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
+                buf.pop();
+            }
+            Event::Key(KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT, .. }) => {
+                buf.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    terminal::disable_raw_mode()?;
+    Ok(buf)
 }
