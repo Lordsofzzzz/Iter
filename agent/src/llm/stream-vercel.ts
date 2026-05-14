@@ -1,8 +1,7 @@
 /**
- * Vercel AI SDK streaming layer for OpenRouter.
+ * Vercel AI SDK streaming layer - multi-provider support.
  */
 
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
 import type {
@@ -15,6 +14,8 @@ import type {
   ToolCall,
   Usage,
 } from './types.js';
+import { createModel, getDefaultModel } from './model-factory.js';
+import { getActiveProvider } from './provider.js';
 
 function toVercelMessages(messages: Message[]): any[] {
   const result: any[] = [];
@@ -119,13 +120,13 @@ export async function* streamLLM(
     signal?: AbortSignal;
   },
 ): AsyncIterable<AssistantMessageEvent> {
-  const apiKey = process.env.OPENROUTER_API_KEY ?? '';
+  const provider = getActiveProvider();
+  const modelId = model.includes('/') ? model.split('/')[1] : model;
+  const finalModel = modelId || getDefaultModel(provider.id);
 
-  console.error(`[stream-vercel] model=${model}`);
+  console.error(`[stream-vercel] provider=${provider.id} model=${finalModel}`);
 
-  const provider = createOpenRouter({ apiKey });
-
-  const baseModel: any = provider.chat(model);
+  const baseModel = await createModel({ provider: provider.id, modelId: finalModel });
 
   const vercelTools: Record<string, any> = {};
   for (const t of context.tools) {

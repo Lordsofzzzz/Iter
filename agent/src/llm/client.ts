@@ -15,6 +15,8 @@ import { buildSystemPrompt }            from '../system-prompt.js';
 import { tools }                        from '../tools/index.js';
 import type { AgentLoopEvent, Message, AssistantMessage } from './types.js';
 import { transformContext } from './context.js';
+import { createModel, getDefaultModel, listModels, clearModelCache } from './model-factory.js';
+import { getActiveProvider, setActiveProvider, listProviders } from './provider.js';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 

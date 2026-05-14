@@ -8,6 +8,8 @@
 import { LLMClient, MODEL_NAME, getModelLimit, clearHistory, setModel } from './llm/index.js';
 import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
 import { logToFile } from './utils/logger.js';
+import { listProviders, setActiveProvider, getActiveProvider, PROVIDERS } from './llm/provider.js';
+import { listModels, getDefaultModel } from './llm/model-factory.js';
 
 // ============================================================================
 // Configuration
@@ -209,7 +211,6 @@ function handleSlashCommand(text: string, id?: string): void {
     case '/model': {
       const idx = parseInt(args[0] ?? '', 10);
       if (isNaN(idx) || idx < 0 || idx >= FREE_MODELS.length) {
-        // List available models
         const list = FREE_MODELS.map((m, i) => `${i}: ${m}`).join('\n');
         emitEvent({
           type: 'tool_result',
@@ -228,11 +229,55 @@ function handleSlashCommand(text: string, id?: string): void {
       break;
     }
 
+    case '/provider': {
+      const providerArg = args[0]?.toLowerCase();
+      if (!providerArg) {
+        const providers = listProviders();
+        const list = providers.map(p => `${p.id}: ${p.name}`).join('\n');
+        emitEvent({
+          type: 'tool_result',
+          name: 'provider',
+          output: `Available providers:\n${list}\n\nUsage: /provider <name>\nCurrent: ${getActiveProvider().id}`,
+        });
+      } else {
+        const success = setActiveProvider(providerArg);
+        if (success) {
+          const defaultModel = getDefaultModel(providerArg);
+          setModel(defaultModel);
+          emitEvent({
+            type: 'tool_result',
+            name: 'provider',
+            output: `Switched to: ${providerArg} (default: ${defaultModel})`,
+          });
+        } else {
+          emitEvent({
+            type: 'tool_result',
+            name: 'provider',
+            output: `Unknown provider: ${providerArg}\nAvailable: ${listProviders().map(p => p.id).join(', ')}`,
+          });
+        }
+      }
+      break;
+    }
+
+    case '/models': {
+      const modelsByProvider = listModels();
+      const output = Object.entries(modelsByProvider)
+        .map(([p, models]) => `${p}:\n  ${models.join('\n  ')}`)
+        .join('\n\n');
+      emitEvent({
+        type: 'tool_result',
+        name: 'models',
+        output: `Available models:\n\n${output}`,
+      });
+      break;
+    }
+
     default:
       emitEvent({
         type: 'tool_result',
         name: 'unknown',
-        output: `Unknown command: ${cmd}\nAvailable: /clear, /model [0-${FREE_MODELS.length - 1}]`,
+        output: `Unknown command: ${cmd}\nAvailable: /clear, /model [0-3], /provider [name], /models`,
       });
   }
 }
