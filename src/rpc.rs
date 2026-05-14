@@ -82,6 +82,13 @@ pub struct SetModelData {
     pub model_limit: u32,
 }
 
+/// Data returned in a successful `set_provider` response.
+#[derive(Debug, Deserialize)]
+pub struct SetProviderData {
+    pub provider: String,
+    pub model:    Option<String>,
+}
+
 /// Data for the `get_state` command response.
 #[derive(Debug, Deserialize)]
 pub struct StateData {

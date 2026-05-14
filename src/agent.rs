@@ -116,6 +116,14 @@ pub fn apply_pull_response(state: &mut State, resp: rpc::PullResponse) {
                 }
             }
         }
+        "set_provider" => {
+            if let Some(data) = resp.data {
+                if let Ok(s) = serde_json::from_value::<rpc::SetProviderData>(data) {
+                    state.provider_name = s.provider.clone();
+                    state.model_name = s.model.clone().unwrap_or_default();
+                }
+            }
+        }
         _ => {}
     }
 }

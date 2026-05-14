@@ -52,7 +52,27 @@ fn main() -> io::Result<()> {
     );
     drain_startup(&rx, &mut state, &mut agent_stdin);
 
-    if let Some(model) = &cli.global.model {
+    // Resolve provider + model: flags > interactive picker > env defaults.
+    let (resolved_provider, resolved_model) = match (&cli.global.provider, &cli.global.model) {
+        (Some(p), Some(m)) => (Some(p.clone()), Some(m.clone())),
+        (Some(p), None) => (Some(p.clone()), None),
+        (None, Some(m)) => (None, Some(m.clone())),
+        (None, None) => pick_provider_model_interactive()?,
+    };
+
+    if let Some(provider) = &resolved_provider {
+        agent::send_cmd(
+            &mut agent_stdin,
+            serde_json::json!({
+                "id": "set-provider",
+                "type": "set_provider",
+                "provider": provider,
+            }),
+        );
+        drain_startup(&rx, &mut state, &mut agent_stdin);
+    }
+
+    if let Some(model) = &resolved_model {
         agent::send_cmd(
             &mut agent_stdin,
             serde_json::json!({
@@ -420,4 +440,76 @@ fn print_response(text: &str) {
     if !md_buf.is_empty() {
         termimad::print_text(md_buf.trim_end_matches('\n'));
     }
+}
+
+/// Interactive startup picker: select vendor then model.
+/// Returns (provider, model) — both optional (Enter skips to env defaults).
+fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<String>)> {
+    let providers: &[(&str, &str, &[&str])] = &[
+        ("anthropic",  "Anthropic",  &["claude-sonnet-4-20250514", "claude-opus-4-5-20250514", "claude-haiku-3-5-20250514"]),
+        ("openai",     "OpenAI",     &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"]),
+        ("google",     "Google",     &["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"]),
+        ("deepseek",   "DeepSeek",   &["deepseek-chat", "deepseek-coder"]),
+        ("groq",       "Groq",       &["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]),
+        ("mistral",    "Mistral",    &["mistral-small-latest", "mistral-large-latest"]),
+        ("openrouter", "OpenRouter", &["anthropic/claude-3.5-sonnet", "google/gemma-3-27b-it", "deepseek/deepseek-chat"]),
+        ("ollama",     "Ollama",     &["llama3", "mistral", "codellama"]),
+    ];
+
+    // --- Vendor picker ---
+    println!("\n{}", "Select vendor:".with(Color::DarkCyan).bold());
+    for (i, (id, name, _)) in providers.iter().enumerate() {
+        println!("  {}  {} {}", format!("[{i}]").with(Color::DarkGrey), name.with(Color::White), id.with(Color::DarkGrey));
+    }
+    println!("  {}  {}", "[\u{21b5}]".with(Color::DarkGrey), "skip (use env defaults)".with(Color::DarkGrey));
+    print!("\n{} ", "vendor >".with(Color::DarkGreen));
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Ok((None, None));
+    }
+
+    let provider_entry = input.parse::<usize>()
+        .ok()
+        .and_then(|i| providers.get(i))
+        .or_else(|| providers.iter().find(|(id, name, _)| id.eq_ignore_ascii_case(input) || name.eq_ignore_ascii_case(input)));
+
+    let Some((provider_id, provider_name, models)) = provider_entry else {
+        println!("  {} unknown vendor '{}', using env defaults", "!".with(Color::DarkYellow), input);
+        return Ok((None, None));
+    };
+
+    // --- Model picker ---
+    println!("\n{} {}:", "Select model for".with(Color::DarkCyan).bold(), provider_name.with(Color::White));
+    for (i, m) in models.iter().enumerate() {
+        println!("  {}  {}", format!("[{i}]").with(Color::DarkGrey), m.with(Color::White));
+    }
+    println!("  {}  {}", "[\u{21b5}]".with(Color::DarkGrey), format!("default ({})", models[0]).with(Color::DarkGrey));
+    println!("  {}  {}", "[text]".with(Color::DarkGrey), "type any model name".with(Color::DarkGrey));
+    print!("\n{} ", "model  >".with(Color::DarkGreen));
+    io::stdout().flush()?;
+
+    let mut model_input = String::new();
+    io::stdin().read_line(&mut model_input)?;
+    let model_input = model_input.trim();
+
+    let model = if model_input.is_empty() {
+        models[0].to_string()
+    } else if let Ok(i) = model_input.parse::<usize>() {
+        models.get(i).copied().unwrap_or(models[0]).to_string()
+    } else {
+        model_input.to_string()
+    };
+
+    println!("\n  {} {}  {}\n",
+        "using".with(Color::DarkGrey),
+        provider_id.with(Color::DarkCyan),
+        model.as_str().with(Color::White).bold(),
+    );
+
+    Ok((Some(provider_id.to_string()), Some(model)))
 }

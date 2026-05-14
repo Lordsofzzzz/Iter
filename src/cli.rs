@@ -19,6 +19,10 @@ pub struct Cli {
 
 #[derive(Debug, Args, Clone)]
 pub struct GlobalOptions {
+    /// Provider to use (anthropic, openai, google, deepseek, groq, mistral, ollama, openrouter).
+    #[arg(short, long, env = "ITER_PROVIDER", global = true)]
+    pub provider: Option<String>,
+
     /// Model id to use for this session.
     #[arg(short, long, env = "MODEL_NAME", global = true)]
     pub model: Option<String>,
