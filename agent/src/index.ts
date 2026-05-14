@@ -242,12 +242,11 @@ function handleSlashCommand(text: string, id?: string): void {
       } else {
         const success = setActiveProvider(providerArg);
         if (success) {
-          const defaultModel = getDefaultModel(providerArg);
-          setModel(defaultModel);
+          setModel('');
           emitEvent({
             type: 'tool_result',
             name: 'provider',
-            output: `Switched to: ${providerArg} (default: ${defaultModel})`,
+            output: `Switched to: ${providerArg}. Select a model with /model <name>.`,
           });
         } else {
           emitEvent({

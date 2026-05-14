@@ -20,7 +20,7 @@ import { getActiveProvider, setActiveProvider, listProviders } from './provider.
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-export let MODEL_NAME = process.env.MODEL_NAME ?? 'minimax/minimax-m2.5:free';
+export let MODEL_NAME = process.env.MODEL_NAME ?? '';
 export const MODEL_TEMP = getTemperature();
 
 const FALLBACK_LIMIT = 128_000;

@@ -121,8 +121,10 @@ export async function* streamLLM(
   },
 ): AsyncIterable<AssistantMessageEvent> {
   const provider = getActiveProvider();
-  const modelId = model.includes('/') ? model.split('/')[1] : model;
-  const finalModel = modelId || getDefaultModel(provider.id);
+  if (!model) {
+    throw new Error('No model selected. Use the ask command to select a provider and model first.');
+  }
+  const finalModel = model;
 
   console.error(`[stream-vercel] provider=${provider.id} model=${finalModel}`);
 
