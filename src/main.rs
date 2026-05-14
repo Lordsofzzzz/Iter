@@ -587,27 +587,44 @@ fn infer_provider_from_model(model: &str) -> Option<String> {
 fn read_masked_line() -> io::Result<String> {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
     use crossterm::terminal;
+    use crossterm::execute;
 
     terminal::enable_raw_mode()?;
+    execute!(io::stdout(), event::EnableBracketedPaste)?;
+
     let mut buf = String::new();
+    let mut stdout = io::stdout();
 
     loop {
         match event::read()? {
             Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => break,
             Event::Key(KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. }) => {
+                execute!(stdout, event::DisableBracketedPaste)?;
                 terminal::disable_raw_mode()?;
                 return Err(io::Error::new(io::ErrorKind::Interrupted, "ctrl-c"));
             }
             Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
-                buf.pop();
+                if buf.pop().is_some() {
+                    print!("\x08 \x08");
+                    let _ = stdout.flush();
+                }
             }
             Event::Key(KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT, .. }) => {
                 buf.push(c);
+                print!("*");
+                let _ = stdout.flush();
+            }
+            Event::Paste(text) => {
+                let stars: String = "*".repeat(text.chars().count());
+                buf.push_str(&text);
+                print!("{stars}");
+                let _ = stdout.flush();
             }
             _ => {}
         }
     }
 
+    execute!(stdout, event::DisableBracketedPaste)?;
     terminal::disable_raw_mode()?;
     Ok(buf)
 }
