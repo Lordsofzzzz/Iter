@@ -86,86 +86,100 @@ export const PROVIDERS: ProviderConfig[] = [
   },
 ];
 
-// ── Active provider state ─────────────────────────────────────────────
+// ── Provider Manager ──────────────────────────────────────────────────
 
-let _activeProvider: ProviderConfig | null = null;
+export class ProviderManager {
+  private _activeProvider: ProviderConfig | null = null;
 
-/** Resolve API key from environment. */
-export function resolveApiKey(cfg: ProviderConfig): string {
-  const raw = process.env[cfg.apiKeyEnv] ?? '';
-  return raw;
-}
+  /** Resolve API key from environment. */
+  resolveApiKey(cfg: ProviderConfig): string {
+    const raw = process.env[cfg.apiKeyEnv] ?? '';
+    return raw;
+  }
 
-/**
- * Auto-detect the first provider with a non-empty API key in the environment.
- * Priority: OPENROUTER → ANTHROPIC → OPENAI → GOOGLE → DEEPSEEK → GROQ → MISTRAL → OLLAMA
- */
-export function detectProvider(): ProviderConfig {
-  const explicit = process.env.ITER_PROVIDER;
-  if (explicit) {
-    const found = PROVIDERS.find(p => p.id === explicit);
-    if (found) {
-      console.error(`[provider] using explicit ITER_PROVIDER=${explicit}`);
-      return found;
+  /**
+   * Auto-detect the first provider with a non-empty API key in the environment.
+   * Priority: OPENROUTER → ANTHROPIC → OPENAI → GOOGLE → DEEPSEEK → GROQ → MISTRAL → OLLAMA
+   */
+  detectProvider(): ProviderConfig {
+    const explicit = process.env.ITER_PROVIDER;
+    if (explicit) {
+      const found = PROVIDERS.find(p => p.id === explicit);
+      if (found) {
+        console.error(`[provider] using explicit ITER_PROVIDER=${explicit}`);
+        return found;
+      }
+      console.error(`[provider] ITER_PROVIDER=${explicit} not found, falling back to auto-detect`);
     }
-    console.error(`[provider] ITER_PROVIDER=${explicit} not found, falling back to auto-detect`);
-  }
 
-  for (const p of PROVIDERS) {
-    if (p.id === 'ollama') continue;
-    const key = resolveApiKey(p);
-    if (key) {
-      console.error(`[provider] auto-detected: ${p.id}`);
-      return p;
+    for (const p of PROVIDERS) {
+      if (p.id === 'ollama') continue;
+      const key = this.resolveApiKey(p);
+      if (key) {
+        console.error(`[provider] auto-detected: ${p.id}`);
+        return p;
+      }
     }
+
+    console.error('[provider] no API key found, falling back to Ollama');
+    return PROVIDERS.find(p => p.id === 'ollama')!;
   }
 
-  console.error('[provider] no API key found, falling back to Ollama');
-  return PROVIDERS.find(p => p.id === 'ollama')!;
-}
-
-export function getActiveProvider(): ProviderConfig {
-  if (!_activeProvider) {
-    _activeProvider = detectProvider();
-  }
-  return _activeProvider;
-}
-
-export function setActiveProvider(providerId: string): boolean {
-  const found = PROVIDERS.find(p => p.id === providerId);
-  if (!found) return false;
-  _activeProvider = found;
-  console.error(`[provider] switched to: ${providerId}`);
-  return true;
-}
-
-export function listProviders(): ProviderConfig[] {
-  return PROVIDERS;
-}
-
-export function inferProvider(model: string): ProviderConfig {
-  const active = getActiveProvider();
-  if (active.id === 'openrouter') return active;
-
-  if (model.startsWith('claude-')) return PROVIDERS.find(p => p.id === 'anthropic')!;
-  if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) {
-    return PROVIDERS.find(p => p.id === 'openai')!;
-  }
-  if (model.startsWith('gemini-')) return PROVIDERS.find(p => p.id === 'google')!;
-  if (model.startsWith('deepseek-')) return PROVIDERS.find(p => p.id === 'deepseek')!;
-  if (model.startsWith('llama') || model.startsWith('mixtral') || model.startsWith('gemma')) {
-    return PROVIDERS.find(p => p.id === 'groq')!;
+  getActiveProvider(): ProviderConfig {
+    if (!this._activeProvider) {
+      this._activeProvider = this.detectProvider();
+    }
+    return this._activeProvider;
   }
 
-  return active;
+  setActiveProvider(providerId: string): boolean {
+    const found = PROVIDERS.find(p => p.id === providerId);
+    if (!found) return false;
+    this._activeProvider = found;
+    console.error(`[provider] switched to: ${providerId}`);
+    return true;
+  }
+
+  listProviders(): ProviderConfig[] {
+    return PROVIDERS;
+  }
+
+  inferProvider(model: string): ProviderConfig {
+    const active = this.getActiveProvider();
+    if (active.id === 'openrouter') return active;
+
+    if (model.startsWith('claude-')) return PROVIDERS.find(p => p.id === 'anthropic')!;
+    if (model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3')) {
+      return PROVIDERS.find(p => p.id === 'openai')!;
+    }
+    if (model.startsWith('gemini-')) return PROVIDERS.find(p => p.id === 'google')!;
+    if (model.startsWith('deepseek-')) return PROVIDERS.find(p => p.id === 'deepseek')!;
+    if (model.startsWith('llama') || model.startsWith('mixtral') || model.startsWith('gemma')) {
+      return PROVIDERS.find(p => p.id === 'groq')!;
+    }
+
+    return active;
+  }
+
+  stripProviderPrefix(model: string): string {
+    const slash = model.indexOf('/');
+    if (slash === -1) return model;
+    const prefix = model.slice(0, slash);
+    if (PROVIDERS.some(p => p.id === prefix)) {
+      return model.slice(slash + 1);
+    }
+    return model;
+  }
 }
 
-export function stripProviderPrefix(model: string): string {
-  const slash = model.indexOf('/');
-  if (slash === -1) return model;
-  const prefix = model.slice(0, slash);
-  if (PROVIDERS.some(p => p.id === prefix)) {
-    return model.slice(slash + 1);
-  }
-  return model;
-}
+// ── Singleton instance ──────────────────────────────────────────────────
+
+export const providerManager = new ProviderManager();
+
+// Re-export as flat functions for backward compatibility
+export const getActiveProvider = () => providerManager.getActiveProvider();
+export const setActiveProvider = (id: string) => providerManager.setActiveProvider(id);
+export const listProviders = () => providerManager.listProviders();
+export const resolveApiKey = (cfg: ProviderConfig) => providerManager.resolveApiKey(cfg);
+export const inferProvider = (model: string) => providerManager.inferProvider(model);
+export const stripProviderPrefix = (model: string) => providerManager.stripProviderPrefix(model);

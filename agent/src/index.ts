@@ -5,23 +5,21 @@
  * Communicates with the Rust TUI via JSONL over stdin/stdout.
  */
 
-import { LLMClient, MODEL_NAME, getModelLimit, clearHistory, setModel } from './llm/index.js';
+import { LLMClient, getModelLimit } from './llm/index.js';
+
+function clearHistory(client: LLMClient): void {
+  client.clearHistory();
+}
 import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
 import { logToFile } from './utils/logger.js';
 import { listProviders, setActiveProvider, getActiveProvider, PROVIDERS } from './llm/provider.js';
-import { listModels, getDefaultModel } from './llm/model-factory.js';
+import { listModels } from './llm/model-factory.js';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-/** List of available free models on OpenRouter. */
-const FREE_MODELS = [
-  'minimax/minimax-m2y5:free',
-  'google/gemma-3-27b-it:free',
-  'meta-llama/llama-4-maverick:free',
-  'deepseek/deepseek-r1-0528:free',
-] as const;
+
 
 // ============================================================================
 // Global State
@@ -29,7 +27,7 @@ const FREE_MODELS = [
 
 const llm = new LLMClient();
 let isStreaming = false;
-let currentModel = MODEL_NAME;
+let currentModel = llm.getModel();
 
 // ============================================================================
 // Initialization
@@ -72,16 +70,16 @@ readStdinLines(async (line: string) => {
         id,
         success: true,
         data: {
-          model_name:   MODEL_NAME,
-          model_limit:  getModelLimit(),
-          temp:         0.3,
+          model_name:   llm.getModel(),
+          model_limit:  llm.getModelLimit(),
+          temp:         llm.getTemperature(),
           is_streaming: isStreaming,
         },
       });
       break;
 
     case 'get_session_stats': {
-      const data = llm.getSessionStatsResponse(getModelLimit());
+      const data = llm.getSessionStatsResponse(llm.getModelLimit());
       emitResponse({
         kind: 'response',
         command: 'get_session_stats',
@@ -98,8 +96,8 @@ readStdinLines(async (line: string) => {
         emitResponse({ kind: 'response', command: 'set_model', id, success: false, error: 'model field required' });
         break;
       }
-      setModel(model);
-      emitResponse({ kind: 'response', command: 'set_model', id, success: true, data: { model_name: model, model_limit: getModelLimit() } });
+      llm.setModel(model);
+      emitResponse({ kind: 'response', command: 'set_model', id, success: true, data: { model_name: model, model_limit: llm.getModelLimit() } });
       break;
     }
 
@@ -209,17 +207,16 @@ function handleSlashCommand(text: string, id?: string): void {
       break;
 
     case '/model': {
-      const idx = parseInt(args[0] ?? '', 10);
-      if (isNaN(idx) || idx < 0 || idx >= FREE_MODELS.length) {
-        const list = FREE_MODELS.map((m, i) => `${i}: ${m}`).join('\n');
+      const modelName = args[0];
+      if (!modelName) {
         emitEvent({
           type: 'tool_result',
           name: 'model',
-          output: `Available models:\n${list}\n\nUsage: /model <0-${FREE_MODELS.length - 1}>`,
+          output: `Usage: /model <model-name>\nExample: /model anthropic/claude-sonnet-4-5\n\nUse /models to list available models.\nCurrent: ${currentModel || '(none)'}`,
         });
       } else {
-        currentModel = FREE_MODELS[idx];
-        setModel(currentModel);
+        currentModel = modelName;
+        llm.setModel(currentModel);
         emitEvent({
           type: 'tool_result',
           name: 'model',
@@ -242,7 +239,7 @@ function handleSlashCommand(text: string, id?: string): void {
       } else {
         const success = setActiveProvider(providerArg);
         if (success) {
-          setModel('');
+          llm.setModel('');
           emitEvent({
             type: 'tool_result',
             name: 'provider',

@@ -15,28 +15,24 @@ import { buildSystemPrompt }            from '../system-prompt.js';
 import { tools }                        from '../tools/index.js';
 import type { AgentLoopEvent, Message, AssistantMessage } from './types.js';
 import { transformContext } from './context.js';
-import { createModel, getDefaultModel, listModels, clearModelCache } from './model-factory.js';
+import { createModel, listModels, clearModelCache } from './model-factory.js';
 import { getActiveProvider, setActiveProvider, listProviders } from './provider.js';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-export let MODEL_NAME = process.env.MODEL_NAME ?? '';
-export const MODEL_TEMP = getTemperature();
-
 const FALLBACK_LIMIT = 128_000;
+
+export const MODEL_TEMP = getTemperature();
 
 // model_id → context window size, populated at startup from OpenRouter
 const _contextWindowMap = new Map<string, number>();
-let _activeModel = MODEL_NAME;
-let _activeModelLimit = FALLBACK_LIMIT;
 
 export function getModelLimit(): number {
-  return _activeModelLimit;
+  return FALLBACK_LIMIT;
 }
 
-export function setModel(model: string): void {
-  _activeModel = model;
-  _activeModelLimit = _contextWindowMap.get(model) ?? FALLBACK_LIMIT;
+export function setModelLimit(model: string, limit: number): void {
+  _contextWindowMap.set(model, limit);
 }
 
 // ── Client ────────────────────────────────────────────────────────────────────
@@ -48,6 +44,27 @@ export class LLMClient {
   private cachedSystemPrompt: string | null = null;
   // Session-level retry counter — lives outside the loop, resets on success (pi pattern)
   private _retryAttempt = 0;
+
+  // Instance-level model state (replaces module globals)
+  private _model = process.env.MODEL_NAME ?? '';
+  private _modelLimit = FALLBACK_LIMIT;
+
+  getModel(): string {
+    return this._model;
+  }
+
+  getModelLimit(): number {
+    return this._modelLimit;
+  }
+
+  setModel(model: string, limit?: number): void {
+    this._model = model;
+    this._modelLimit = limit ?? _contextWindowMap.get(model) ?? FALLBACK_LIMIT;
+  }
+
+  getTemperature(): number {
+    return MODEL_TEMP;
+  }
 
   private getSystemPrompt(): string {
     if (!this.cachedSystemPrompt) {
@@ -97,7 +114,12 @@ export class LLMClient {
   }
 
   async streamResponse(userMessage: string, model?: string): Promise<void> {
-    if (model) _activeModel = model;
+    if (model) this.setModel(model);
+
+    if (!this._model) {
+      emitEvent({ type: 'error', message: 'No model selected. Use /model <name> to set one.' });
+      return;
+    }
 
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
@@ -119,8 +141,8 @@ export class LLMClient {
             tools,
           },
           {
-            model:            _activeModel,
-            temperature:      MODEL_TEMP,
+            model:            this.getModel(),
+            temperature:      this.getTemperature(),
             toolExecution:    'parallel',
             transformContext: async (msgs) => transformContext(msgs),
           },

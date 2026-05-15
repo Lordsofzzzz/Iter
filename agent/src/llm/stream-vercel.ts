@@ -14,7 +14,7 @@ import type {
   ToolCall,
   Usage,
 } from './types.js';
-import { createModel, getDefaultModel } from './model-factory.js';
+import { createModel } from './model-factory.js';
 import { getActiveProvider } from './provider.js';
 
 function toVercelMessages(messages: Message[]): any[] {

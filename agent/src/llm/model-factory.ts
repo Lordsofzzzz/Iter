@@ -6,7 +6,7 @@
  */
 
 import type { LanguageModel } from 'ai';
-import { getActiveProvider, listProviders, resolveApiKey, type ProviderConfig } from './provider.js';
+import { listProviders, resolveApiKey, type ProviderConfig } from './provider.js';
 
 export interface ModelConfig {
   provider: string;
@@ -96,20 +96,6 @@ const modelCreators: Record<string, ModelCreator> = {
   openrouter: createOpenRouterModel,
 };
 
-export function getDefaultModel(providerId: string): string {
-  const defaults: Record<string, string> = {
-    anthropic: 'claude-sonnet-4-20250514',
-    openai: 'gpt-4o',
-    google: 'gemini-2.0-flash',
-    deepseek: 'deepseek-chat',
-    groq: 'llama-3.3-70b-versatile',
-    mistral: 'mistral-small-latest',
-    ollama: 'llama3',
-    openrouter: 'anthropic/claude-3.5-sonnet',
-  };
-  return defaults[providerId] ?? 'gpt-4o';
-}
-
 export function listModels(): Record<string, string[]> {
   return {
     anthropic: ['claude-opus-4-5-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-3-5-20250514'],
@@ -142,10 +128,4 @@ export async function createModel(config: ModelConfig): Promise<any> {
 
 export function clearModelCache(): void {
   modelCache.clear();
-}
-
-export function getActiveModelInfo(): { provider: string; modelId: string } | null {
-  const provider = getActiveProvider();
-  const defaultModel = getDefaultModel(provider.id);
-  return { provider: provider.id, modelId: defaultModel };
 }
