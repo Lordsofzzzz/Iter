@@ -181,8 +181,18 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(style::PrintStyledContent("│ ".with(Color::DarkGreen)))?;
         out.queue(style::PrintStyledContent(PROMPT.with(Color::Green)))?;
-        out.queue(style::Print(&visible))?;
-        out.queue(style::Print(" ".repeat(input_width.saturating_sub(visible_width))))?;
+        if visible.is_empty() {
+            let hint = "describe your task…";
+            let hint_width = UnicodeWidthStr::width(hint).min(input_width);
+            out.queue(style::PrintStyledContent(
+                hint[..hint.char_indices().nth(hint_width).map(|(i,_)| i).unwrap_or(hint.len())]
+                    .with(Color::DarkGrey)
+            ))?;
+            out.queue(style::Print(" ".repeat(input_width.saturating_sub(hint_width))))?;
+        } else {
+            out.queue(style::Print(&visible))?;
+            out.queue(style::Print(" ".repeat(input_width.saturating_sub(visible_width))))?;
+        }
         out.queue(style::PrintStyledContent(" │".with(Color::DarkGreen)))?;
 
         out.queue(cursor::MoveDown(1))?;
@@ -215,20 +225,27 @@ fn reserve(&self, state: &State) -> io::Result<()> {
             Color::DarkGreen
         };
 
+        let bar_width = 10usize;
+        let filled = ((state.context_pct / 100.0) * bar_width as f32).round() as usize;
+        let filled = filled.min(bar_width);
+        let bar: String = format!("[{}{}]",
+            "█".repeat(filled),
+            "─".repeat(bar_width - filled),
+        );
+
         write!(
             out,
-            "  {} {}  {} {}  {} {}  {} {}  {} {}/{} ({:.0}%)  {} ${:.4}  {} {}",
+            "  {} {} {} {}  {} {} {} {}  {} {} {:.0}%  {} ${}  {} {}",
             "in".with(Color::DarkGrey),
             format_tokens(state.tokens_input).with(Color::White),
             "out".with(Color::DarkGrey),
             format_tokens(state.tokens_output).with(Color::White),
-            "cache↑".with(Color::DarkGrey),
+            "↑".with(Color::DarkGrey),
             format_tokens(state.tokens_cache_write).with(Color::DarkCyan),
-            "cache↓".with(Color::DarkGrey),
+            "↓".with(Color::DarkGrey),
             format_tokens(state.tokens_cache_read).with(Color::Cyan),
             "ctx".with(Color::DarkGrey),
-            format_tokens(state.context_tokens).with(ctx_color),
-            format_tokens(state.model_limit).with(Color::DarkGrey),
+            bar.with(ctx_color),
             state.context_pct,
             "cost".with(Color::DarkGrey),
             format!("{:.4}", state.cost).with(Color::White),

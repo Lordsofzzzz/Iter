@@ -203,12 +203,17 @@ fn handle_push_event(
         }
         PushEvent::ToolCall { name, input } => {
             state.pending_tool_call = Some((name.clone(), input.clone()));
+            state.tool_start_time = Some(std::time::Instant::now());
             state.tool_calls += 1;
             print_tool_call(&name, &input);
         }
         PushEvent::ToolResult { name, output } => {
+            let elapsed_ms = state.tool_start_time
+                .take()
+                .map(|t| t.elapsed().as_millis() as u64)
+                .unwrap_or(0);
             state.pending_tool_call = None;
-            print_tool_result(&name, &output);
+            print_tool_result(&name, &output, elapsed_ms);
         }
         PushEvent::ToolUpdate { .. } => {}
         PushEvent::Cooldown { wait_ms, retries_left } => {
@@ -257,7 +262,14 @@ fn handle_push_event(
             println!();
             return Ok(LoopAction::Done);
         }
-        PushEvent::AgentStart | PushEvent::TurnStart | PushEvent::TurnEnd => {}
+        PushEvent::AgentStart => {}
+        PushEvent::TurnStart => {
+            state.thinking_token_count = 0;
+        }
+        PushEvent::TurnEnd => {
+            state.thinking_token_count = 0;
+            state.thinking_buf.clear();
+        }
     }
     Ok(LoopAction::Continue)
 }
@@ -337,15 +349,23 @@ fn print_welcome(state: &State) {
         &state.model_name
     };
 
+    let version = env!("CARGO_PKG_VERSION");
+
     println!(
-        "{}  {}",
+        "{}  {}  {}",
         "iter".with(Color::DarkGreen).bold(),
+        format!("v{version}").with(Color::DarkGrey),
         model.with(Color::DarkGrey),
     );
     println!(
         "{}",
-        "-----------------------------------------".with(Color::DarkGrey)
+        "─────────────────────────────────────────".with(Color::DarkGrey)
     );
+    println!(
+        "  {}",
+        "↵ submit   ^k abort   ^u clear   ^c quit".with(Color::DarkGrey),
+    );
+    println!();
 }
 
 fn print_agent_header(state: &State) {
@@ -366,22 +386,37 @@ fn print_tool_call(name: &str, input: &str) {
     );
 }
 
-fn print_tool_result(name: &str, output: &str) {
-    let lines: Vec<&str> = output.lines().take(6).collect();
-    let preview = lines.join("\n    ");
-    let suffix = if output.lines().count() > 6 {
-        "\n    ..."
+fn print_tool_result(name: &str, output: &str, elapsed_ms: u64) {
+    let elapsed = if elapsed_ms >= 1000 {
+        format!("{:.1}s", elapsed_ms as f64 / 1000.0)
     } else {
-        ""
+        format!("{}ms", elapsed_ms)
     };
 
     println!(
-        "  {} {}\n    {}{}",
-        "done".with(Color::DarkGreen),
+        "  {} {} · {}",
+        "✓".with(Color::DarkGreen),
         name.with(Color::DarkGrey),
-        preview,
-        suffix,
+        elapsed.with(Color::DarkGrey),
     );
+
+    let lines: Vec<&str> = output.lines().take(8).collect();
+    let preview = format_tool_output(&lines.join("\n"));
+    for line in preview.lines() {
+        println!("    {}", line);
+    }
+    if output.lines().count() > 8 {
+        println!("    {}", format!("… +{} lines", output.lines().count() - 8).with(Color::DarkGrey));
+    }
+    println!();
+}
+
+fn format_tool_output(raw: &str) -> String {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(raw) {
+        serde_json::to_string_pretty(&val).unwrap_or_else(|_| raw.to_string())
+    } else {
+        raw.to_string()
+    }
 }
 
 fn print_status(msg: &str, color: Color) {
