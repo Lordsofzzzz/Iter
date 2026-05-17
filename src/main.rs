@@ -183,17 +183,6 @@ fn handle_push_event(
     match event {
         PushEvent::TextDelta { delta } => {
             response_buf.push_str(&delta);
-            // Stream live only if no markdown detected yet.
-            // Once we see markers, stop streaming and let AgentEnd render.
-            let has_markdown = response_buf.contains("```")
-                || response_buf.contains("**")
-                || response_buf.contains("# ")
-                || response_buf.contains("- ")
-                || response_buf.contains("* ");
-            if !has_markdown {
-                print!("{}", delta);
-                let _ = io::stdout().flush();
-            }
         }
         PushEvent::ThinkingDelta { delta } => {
             if state.show_thinking {
@@ -271,16 +260,7 @@ fn handle_push_event(
                 return Ok(LoopAction::Continue);
             }
             if !response_buf.is_empty() {
-                let has_markdown = response_buf.contains("```")
-                    || response_buf.contains("**")
-                    || response_buf.contains("# ")
-                    || response_buf.contains("- ")
-                    || response_buf.contains("* ");
-                if has_markdown {
-                    // Nothing was streamed — render with full formatting now.
-                    print_response(response_buf);
-                }
-                // else: already streamed live, nothing to do.
+                print_response(response_buf);
             }
             if !success {
                 let message = error.unwrap_or_else(|| "agent turn failed".into());
@@ -420,13 +400,47 @@ fn print_agent_header(state: &State) {
     );
 }
 
+fn tool_human_label(name: &str, input: &str) -> String {
+    let val: serde_json::Value = serde_json::from_str(input).unwrap_or(serde_json::Value::Null);
+    match name {
+        "bash" | "shell" | "run_command" | "execute" | "run_bash" => {
+            let cmd = val.get("command")
+                .or_else(|| val.get("cmd"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(input);
+            let first = cmd.lines().next().unwrap_or(cmd);
+            format!("$ {}", truncate_chars(first, 80))
+        }
+        "read_file" | "read" | "view_file" | "view" => {
+            let path = val.get("path").and_then(|v| v.as_str()).unwrap_or(input);
+            format!("read {}", path)
+        }
+        "write_file" | "write" | "create_file" => {
+            let path = val.get("path").and_then(|v| v.as_str()).unwrap_or(input);
+            format!("write {}", path)
+        }
+        "list_files" | "ls" | "list_directory" => {
+            let path = val.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+            format!("$ ls {}", path)
+        }
+        "search" | "grep" | "find" | "search_files" => {
+            let pattern = val.get("pattern")
+                .or_else(|| val.get("query"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(input);
+            format!("$ grep \"{}\"", truncate_chars(pattern, 60))
+        }
+        _ => {
+            format!("{} {}", name, truncate_chars(input, 80))
+        }
+    }
+}
+
 fn print_tool_call(name: &str, input: &str) {
-    let preview = truncate_chars(input, 120);
+    let label = tool_human_label(name, input);
     println!(
-        "\n  {} {} {}",
-        "tool".with(Color::DarkCyan),
-        name.with(Color::Cyan),
-        preview.with(Color::DarkGrey),
+        "\n  {}",
+        label.with(Color::Cyan),
     );
 }
 
@@ -537,19 +551,19 @@ fn print_response(text: &str) {
 /// Interactive startup picker: select vendor, model, and API key.
 /// Returns (provider, model, api_key).
 fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<String>, Option<String>)> {
-    let providers: &[(&str, &str)] = &[
-        ("anthropic",  "Anthropic"),
-        ("openai",     "OpenAI"),
-        ("google",     "Google"),
-        ("deepseek",   "DeepSeek"),
-        ("groq",       "Groq"),
-        ("mistral",    "Mistral"),
-        ("openrouter", "OpenRouter"),
-        ("ollama",     "Ollama"),
+    let providers: &[(&str, &str, &[&str])] = &[
+        ("anthropic",  "Anthropic",  &["claude-sonnet-4-20250514", "claude-opus-4-5-20250514", "claude-haiku-3-5-20250514"]),
+        ("openai",     "OpenAI",     &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"]),
+        ("google",     "Google",     &["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"]),
+        ("deepseek",   "DeepSeek",   &["deepseek-chat", "deepseek-coder"]),
+        ("groq",       "Groq",       &["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]),
+        ("mistral",    "Mistral",    &["mistral-small-latest", "mistral-large-latest"]),
+        ("openrouter", "OpenRouter", &["anthropic/claude-3.5-sonnet", "google/gemma-3-27b-it", "deepseek/deepseek-chat"]),
+        ("ollama",     "Ollama",     &["llama3", "mistral", "codellama"]),
     ];
 
     println!("\n{}", "Select vendor:".with(Color::DarkCyan).bold());
-    for (i, (id, name)) in providers.iter().enumerate() {
+    for (i, (id, name, _)) in providers.iter().enumerate() {
         println!("  {}  {} {}", format!("[{i}]").with(Color::DarkGrey), name.with(Color::White), id.with(Color::DarkGrey));
     }
     println!("  {}  {}", "[\u{21b5}]".with(Color::DarkGrey), "skip (use env defaults)".with(Color::DarkGrey));
@@ -567,29 +581,39 @@ fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<Strin
     let provider_entry = input.parse::<usize>()
         .ok()
         .and_then(|i| providers.get(i))
-        .or_else(|| providers.iter().find(|(id, name)| id.eq_ignore_ascii_case(input) || name.eq_ignore_ascii_case(input)));
+        .or_else(|| providers.iter().find(|(id, name, _)| id.eq_ignore_ascii_case(input) || name.eq_ignore_ascii_case(input)));
 
-    let Some((provider_id, _provider_name)) = provider_entry else {
+    let Some((provider_id, provider_name, models)) = provider_entry else {
         println!("  {} unknown vendor '{}', using env defaults", "!".with(Color::DarkYellow), input);
         return Ok((None, None, None));
     };
 
-    let model = if provider_id == &"ollama" {
-        println!();
-        "".to_string()
+    println!("\n{} {}:", "Select model for".with(Color::DarkCyan).bold(), provider_name.with(Color::White));
+    for (i, m) in models.iter().enumerate() {
+        println!("  {}  {}", format!("[{i}]").with(Color::DarkGrey), m.with(Color::White));
+    }
+    println!("  {}  {}", "[\u{21b5}]".with(Color::DarkGrey), format!("default ({})", models[0]).with(Color::DarkGrey));
+    println!("  {}  {}", "[text]".with(Color::DarkGrey), "type any model name".with(Color::DarkGrey));
+    print!("\n{} ", "model  >".with(Color::DarkGreen));
+    io::stdout().flush()?;
+
+    let mut model_input = String::new();
+    io::stdin().read_line(&mut model_input)?;
+    let model_input = model_input.trim();
+
+    let model = if model_input.is_empty() {
+        models[0].to_string()
+    } else if let Ok(i) = model_input.parse::<usize>() {
+        models.get(i).copied().unwrap_or(models[0]).to_string()
     } else {
-        print!("\n{} {}: ", "Model".with(Color::DarkCyan), "(type model name)".with(Color::DarkGrey));
-        io::stdout().flush()?;
-        let mut model_input = String::new();
-        io::stdin().read_line(&mut model_input)?;
-        let model_input = model_input.trim().to_string();
-        println!("  {} {}  {}\n",
-            "using".with(Color::DarkGrey),
-            provider_id.with(Color::DarkCyan),
-            model_input.as_str().with(Color::White).bold(),
-        );
-        model_input
+        model_input.to_string()
     };
+
+    println!("\n  {} {}  {}\n",
+        "using".with(Color::DarkGrey),
+        provider_id.with(Color::DarkCyan),
+        model.as_str().with(Color::White).bold(),
+    );
 
     let api_key = prompt_api_key_if_needed(provider_id);
 
