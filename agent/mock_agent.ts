@@ -25,19 +25,20 @@ async function handleCommand(cmd: any) {
   const id = cmd.id;
   switch (cmd.type) {
     case 'get_state':
-      emit({ 
-        kind: 'response', 
-        command: 'get_state', 
-        id, 
-        success: true, 
-        data: { 
-          model_name: 'mock-model', 
-          model_limit: 100000, 
-          is_streaming: isStreaming 
-        } 
+      emit({
+        kind: 'response',
+        command: 'get_state',
+        id,
+        success: true,
+        data: {
+          model_name: 'mock-model',
+          model_limit: 100000,
+          temp: 0.7,
+          is_streaming: isStreaming,
+        },
       });
       break;
-    
+
     case 'abort':
       stopStreaming = true;
       emit({ kind: 'response', command: 'abort', id, success: true });
@@ -55,11 +56,15 @@ async function handleCommand(cmd: any) {
       isStreaming = true;
       stopStreaming = false;
       
-      emit({ type: 'turn_start' });
+      emit({ type: 'turn_start', id });
+      let success = true;
+      let error: string | undefined;
       
       if (content.includes('error')) {
         await sleep(200);
-        emit({ type: 'error', message: 'Simulated LLM Error' });
+        success = false;
+        error = 'Simulated LLM Error';
+        emit({ type: 'error', id, message: error });
       } else if (content.includes('tool')) {
         emit({ type: 'text_delta', delta: 'Running a tool... ' });
         await sleep(500);
@@ -91,8 +96,8 @@ async function handleCommand(cmd: any) {
         await sleep(100);
       }
       
-      emit({ type: 'turn_end' });
-      emit({ type: 'agent_end' });
+      emit({ type: 'turn_end', id });
+      emit({ type: 'agent_end', id, success, ...(error ? { error } : {}) });
       
       isStreaming = false;
       break;

@@ -5,21 +5,15 @@
  * Communicates with the Rust TUI via JSONL over stdin/stdout.
  */
 
-import { LLMClient, getModelLimit } from './llm/index.js';
+import { LLMClient } from './llm/index.js';
+import { listModels } from './llm/model-factory.js';
+import { getActiveProvider, listProviders, setActiveProvider } from './llm/provider.js';
+import { commandMetadata, emitEvent, emitResponse, parseCommandPayload, readStdinLines } from './rpc.js';
+import { logToFile } from './utils/logger.js';
 
 function clearHistory(client: LLMClient): void {
   client.clearHistory();
 }
-import { emitEvent, emitResponse, readStdinLines, SessionStatsData } from './rpc.js';
-import { logToFile } from './utils/logger.js';
-import { listProviders, setActiveProvider, getActiveProvider, PROVIDERS } from './llm/provider.js';
-import { listModels } from './llm/model-factory.js';
-
-// ============================================================================
-// Configuration
-// ============================================================================
-
-
 
 // ============================================================================
 // Global State
@@ -52,16 +46,25 @@ readStdinLines(async (line: string) => {
     return;
   }
 
-  // Validate payload shape.
-  if (!isCommandPayload(payload)) {
-    emitEvent({ type: 'error', message: 'Invalid command payload' });
+  let command;
+  try {
+    command = parseCommandPayload(payload);
+  } catch (err) {
+    const meta = commandMetadata(payload);
+    emitResponse({
+      kind: 'response',
+      command: meta.command,
+      id: meta.id,
+      success: false,
+      error: String((err as Error)?.message ?? err),
+    });
     return;
   }
 
-  const id = typeof payload.id === 'string' ? payload.id : undefined;
+  const { id } = command;
 
   // Dispatch command.
-  switch (payload.type) {
+  switch (command.type) {
 
     case 'get_state':
       emitResponse({
@@ -91,13 +94,43 @@ readStdinLines(async (line: string) => {
     }
 
     case 'set_model': {
-      const model = payload.model;
-      if (!model) {
-        emitResponse({ kind: 'response', command: 'set_model', id, success: false, error: 'model field required' });
+      llm.setModel(command.model);
+      currentModel = command.model;
+      emitResponse({
+        kind: 'response',
+        command: 'set_model',
+        id,
+        success: true,
+        data: { model_name: command.model, model_limit: llm.getModelLimit() },
+      });
+      break;
+    }
+
+    case 'set_provider': {
+      const success = setActiveProvider(command.provider);
+      if (!success) {
+        emitResponse({
+          kind: 'response',
+          command: 'set_provider',
+          id,
+          success: false,
+          error: `Unknown provider: ${command.provider}`,
+        });
         break;
       }
-      llm.setModel(model);
-      emitResponse({ kind: 'response', command: 'set_model', id, success: true, data: { model_name: model, model_limit: llm.getModelLimit() } });
+      const provider = getActiveProvider();
+      emitResponse({
+        kind: 'response',
+        command: 'set_provider',
+        id,
+        success: true,
+        data: { provider: provider.id, model: llm.getModel() || undefined },
+      });
+      emitEvent({
+        type: 'provider_changed',
+        provider_id: provider.id,
+        provider_name: provider.name,
+      });
       break;
     }
 
@@ -125,22 +158,18 @@ readStdinLines(async (line: string) => {
 
     case 'prompt':
     case 'message': {
-      // Validate content field.
-      if (typeof payload.content !== 'string') {
+      // ── Slash command dispatch ──────────────────────────────────────
+      const text = command.content.trim();
+      if (text.startsWith('/')) {
         emitResponse({
           kind: 'response',
           command: 'prompt',
           id,
-          success: false,
-          error: 'content must be a string',
+          success: true,
         });
-        break;
-      }
-
-      // ── Slash command dispatch ──────────────────────────────────────
-      const text = payload.content.trim();
-      if (text.startsWith('/')) {
-        handleSlashCommand(text, id);
+        handleSlashCommand(text);
+        emitEvent({ type: 'turn_end', id });
+        emitEvent({ type: 'agent_end', id, success: true });
         break;
       }
       // ── End slash command dispatch ─────────────────────────────────
@@ -154,6 +183,7 @@ readStdinLines(async (line: string) => {
           success: false,
           error: 'Agent busy',
         });
+        emitEvent({ type: 'agent_end', id, success: false, error: 'Agent busy' });
         break;
       }
 
@@ -166,19 +196,13 @@ readStdinLines(async (line: string) => {
       });
 
       isStreaming = true;
-      await llm.streamResponse(payload.content, currentModel);
-      isStreaming = false;
+      try {
+        await llm.streamResponse(command.content, currentModel, id);
+      } finally {
+        isStreaming = false;
+      }
       break;
     }
-
-    default:
-      emitResponse({
-        kind: 'response',
-        command: payload.type ?? 'unknown',
-        id,
-        success: false,
-        error: `Unknown command: ${payload.type}`,
-      });
   }
 });
 
@@ -189,18 +213,12 @@ readStdinLines(async (line: string) => {
 /**
  * Handles slash commands (/clear, /model).
  */
-function handleSlashCommand(text: string, id?: string): void {
+function handleSlashCommand(text: string): void {
   const [cmd, ...args] = text.split(' ');
 
   switch (cmd) {
     case '/clear':
       clearHistory(llm);
-      emitResponse({
-        kind: 'response',
-        command: 'clear',
-        id,
-        success: true,
-      });
       emitEvent({ type: 'tool_result', name: 'clear', output: 'History cleared.' });
       // Push a system event so TUI knows history is gone
       emitEvent({ type: 'agent_start' });
@@ -240,6 +258,7 @@ function handleSlashCommand(text: string, id?: string): void {
         const success = setActiveProvider(providerArg);
         if (success) {
           llm.setModel('');
+          currentModel = '';
           emitEvent({
             type: 'tool_result',
             name: 'provider',
@@ -276,23 +295,4 @@ function handleSlashCommand(text: string, id?: string): void {
         output: `Unknown command: ${cmd}\nAvailable: /clear, /model [0-3], /provider [name], /models`,
       });
   }
-}
-
-// ============================================================================
-// Type Guards
-// ============================================================================
-
-/** Type guard for command payload. */
-function isCommandPayload(value: unknown): value is {
-  id?: string;
-  type: string;
-  content?: string;
-  model?: string;
-} {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'type' in value &&
-    typeof (value as Record<string, unknown>).type === 'string'
-  );
 }

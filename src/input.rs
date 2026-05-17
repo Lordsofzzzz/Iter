@@ -72,6 +72,8 @@ impl InputBox {
                 
                 self.draw_locked()?;
                 self.move_below_box()?;
+                self.buf.clear();
+                self.cursor = 0;
             }
             _ => {
                 self.erase()?;

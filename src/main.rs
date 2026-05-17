@@ -19,7 +19,7 @@ use crossterm::style::{self, Attribute, Color, Stylize};
 
 use cli::{Cli, Command};
 use input::{InputBox, InputResult};
-use rpc::{AgentMessage, PushEvent, UiEvent};
+use rpc::{AgentMessage, CommandPayload, PushEvent, UiEvent};
 use state::State;
 
 fn main() -> io::Result<()> {
@@ -66,21 +66,17 @@ fn main() -> io::Result<()> {
 
     agent::send_cmd(
         &mut agent_stdin,
-        serde_json::json!({
-            "id": "startup",
-            "type": "get_state",
-        }),
+        CommandPayload::GetState { id: "startup".into() },
     );
     drain_startup(&rx, &mut state, &mut agent_stdin);
 
     if let Some(provider) = &resolved_provider {
         agent::send_cmd(
             &mut agent_stdin,
-            serde_json::json!({
-                "id": "set-provider",
-                "type": "set_provider",
-                "provider": provider,
-            }),
+            CommandPayload::SetProvider {
+                id: "set-provider".into(),
+                provider: provider.clone(),
+            },
         );
         drain_startup(&rx, &mut state, &mut agent_stdin);
     }
@@ -88,11 +84,10 @@ fn main() -> io::Result<()> {
     if let Some(model) = &resolved_model {
         agent::send_cmd(
             &mut agent_stdin,
-            serde_json::json!({
-                "id": "set-model",
-                "type": "set_model",
-                "model": model,
-            }),
+            CommandPayload::SetModel {
+                id: "set-model".into(),
+                model: model.clone(),
+            },
         );
         drain_startup(&rx, &mut state, &mut agent_stdin);
     }
@@ -101,8 +96,9 @@ fn main() -> io::Result<()> {
         Command::Ask { prompt } if !prompt.is_empty() => {
             let prompt = prompt.join(" ");
             print_agent_header(&state);
-            send_prompt(&mut agent_stdin, "prompt-1", prompt);
-            stream_response(&rx, &mut state, &mut agent_stdin)?;
+            let prompt_id = "prompt-1";
+            send_prompt(&mut agent_stdin, prompt_id, prompt);
+            stream_response(&rx, &mut state, prompt_id)?;
         }
         Command::Ask { .. } => {
             interactive_loop(&rx, &mut state, &mut agent_stdin)?;
@@ -132,17 +128,17 @@ fn interactive_loop(
             InputResult::Abort => {
                 agent::send_cmd(
                     agent_stdin,
-                    serde_json::json!({
-                        "id": format!("abort-{turn_id}"),
-                        "type": "abort",
-                    }),
+                    CommandPayload::Abort {
+                        id: format!("abort-{turn_id}"),
+                    },
                 );
                 print_status("aborted", Color::DarkYellow);
             }
             InputResult::Submit(prompt) => {
                 let _ = io::stdout().flush();
-                send_prompt(agent_stdin, &format!("prompt-{turn_id}"), prompt);
-                stream_response(rx, state, agent_stdin)?;
+                let prompt_id = format!("prompt-{turn_id}");
+                send_prompt(agent_stdin, &prompt_id, prompt);
+                stream_response(rx, state, &prompt_id)?;
                 refresh_stats(rx, state, agent_stdin, turn_id);
                 turn_id += 1;
             }
@@ -159,11 +155,10 @@ fn send_prompt(
 ) {
     agent::send_cmd(
         agent_stdin,
-        serde_json::json!({
-            "id": id,
-            "type": "prompt",
-            "content": prompt,
-        }),
+        CommandPayload::Prompt {
+            id: id.to_string(),
+            content: prompt,
+        },
     );
 }
 
@@ -173,8 +168,6 @@ enum LoopAction {
     Continue,
     /// Agent turn finished — render the buffered response and return.
     Done,
-    /// Unrecoverable error — propagate immediately.
-    Error(io::Error),
 }
 
 /// Handle a single push event, updating `state` and `response_buf` as needed.
@@ -185,6 +178,7 @@ fn handle_push_event(
     state: &mut State,
     response_buf: &mut String,
     stdout: &mut impl Write,
+    expected_id: &str,
 ) -> io::Result<LoopAction> {
     match event {
         PushEvent::TextDelta { delta } => {
@@ -245,28 +239,47 @@ fn handle_push_event(
                 );
             }
         }
-        PushEvent::Error { message } => {
+        PushEvent::Error { id, message } => {
+            if !event_id_matches(&id, expected_id) {
+                return Ok(LoopAction::Continue);
+            }
             print_status(&format!("error: {message}"), Color::DarkRed);
-            return Ok(LoopAction::Error(io::Error::new(
-                io::ErrorKind::Other,
-                message,
-            )));
         }
         PushEvent::ModelList { models } => {
             state.models = models.into_iter().map(|m| (m.id, m.name)).collect();
         }
-        PushEvent::AgentEnd => {
+        PushEvent::ProviderChanged { provider_id, provider_name } => {
+            state.provider_name = if provider_name.is_empty() {
+                provider_id
+            } else {
+                provider_name
+            };
+        }
+        PushEvent::AgentEnd { id, success, error } => {
+            if !event_id_matches(&id, expected_id) {
+                return Ok(LoopAction::Continue);
+            }
             if !response_buf.is_empty() {
                 print_response(response_buf);
+            }
+            if !success {
+                let message = error.unwrap_or_else(|| "agent turn failed".into());
+                print_status(&message, Color::DarkRed);
             }
             println!();
             return Ok(LoopAction::Done);
         }
         PushEvent::AgentStart => {}
-        PushEvent::TurnStart => {
+        PushEvent::TurnStart { id } => {
+            if !event_id_matches(&id, expected_id) {
+                return Ok(LoopAction::Continue);
+            }
             state.thinking_token_count = 0;
         }
-        PushEvent::TurnEnd => {
+        PushEvent::TurnEnd { id } => {
+            if !event_id_matches(&id, expected_id) {
+                return Ok(LoopAction::Continue);
+            }
             state.thinking_token_count = 0;
             state.thinking_buf.clear();
         }
@@ -274,10 +287,14 @@ fn handle_push_event(
     Ok(LoopAction::Continue)
 }
 
+fn event_id_matches(id: &Option<String>, expected_id: &str) -> bool {
+    id.as_deref().map_or(true, |id| id == expected_id)
+}
+
 fn stream_response(
     rx: &Receiver<UiEvent>,
     state: &mut State,
-    _agent_stdin: &mut Option<std::process::ChildStdin>,
+    expected_id: &str,
 ) -> io::Result<()> {
     let mut stdout = io::stdout();
     let mut response_buf = String::new();
@@ -285,14 +302,22 @@ fn stream_response(
     loop {
         match rx.recv() {
             Ok(UiEvent::Agent(AgentMessage::Push(event))) => {
-                match handle_push_event(event, state, &mut response_buf, &mut stdout)? {
+                match handle_push_event(event, state, &mut response_buf, &mut stdout, expected_id)? {
                     LoopAction::Continue => {}
                     LoopAction::Done => return Ok(()),
-                    LoopAction::Error(e) => return Err(e),
                 }
             }
             Ok(UiEvent::Agent(AgentMessage::Pull(response))) => {
+                let failed_active_prompt = response.command == "prompt"
+                    && response.id.as_deref() == Some(expected_id)
+                    && !response.success;
+                let error = response.error.clone();
                 agent::apply_pull_response(state, response);
+                if failed_active_prompt {
+                    let message = error.unwrap_or_else(|| "prompt rejected".into());
+                    print_status(&message, Color::DarkRed);
+                    return Ok(());
+                }
             }
             Ok(UiEvent::Agent(AgentMessage::Unknown { raw })) => {
                 eprintln!("\n[rpc] {raw}");
@@ -334,10 +359,9 @@ fn refresh_stats(
 ) {
     agent::send_cmd(
         agent_stdin,
-        serde_json::json!({
-            "id": format!("stats-{turn_id}"),
-            "type": "get_session_stats",
-        }),
+        CommandPayload::GetSessionStats {
+            id: format!("stats-{turn_id}"),
+        },
     );
     drain_startup(rx, state, agent_stdin);
 }

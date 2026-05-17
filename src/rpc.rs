@@ -7,7 +7,24 @@
 
 #![allow(dead_code)]
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+// ============================================================================
+// Commands: CLI -> Agent
+// ============================================================================
+
+/// Typed commands sent from the CLI to the agent.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CommandPayload {
+    GetState { id: String },
+    GetSessionStats { id: String },
+    SetProvider { id: String, provider: String },
+    SetModel { id: String, model: String },
+    Prompt { id: String, content: String },
+    Abort { id: String },
+    Clear { id: String },
+}
 
 // ============================================================================
 // Push Events: Agent → CLI (unprompted)
@@ -19,12 +36,29 @@ use serde::Deserialize;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PushEvent {
     AgentStart,
-    TurnStart,
-    TurnEnd,
-    AgentEnd,
+    TurnStart {
+        #[serde(default)]
+        id: Option<String>,
+    },
+    TurnEnd {
+        #[serde(default)]
+        id: Option<String>,
+    },
+    AgentEnd {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default = "default_success")]
+        success: bool,
+        #[serde(default)]
+        error: Option<String>,
+    },
     TextDelta { delta: String },
     ThinkingDelta { delta: String },
-    Error { message: String },
+    Error {
+        #[serde(default)]
+        id: Option<String>,
+        message: String,
+    },
     Cooldown { wait_ms: u64, retries_left: u32 },
     RetryResult { success: bool, attempt: u32 },
     AutoRetryStart {
@@ -46,6 +80,14 @@ pub enum PushEvent {
     ToolResult { name: String, output: String }, // ← new
     ToolUpdate { tool_call_id: String, delta: String }, // ← live streaming delta
     ModelList { models: Vec<ModelEntry> },
+    ProviderChanged {
+        provider_id: String,
+        provider_name: String,
+    },
+}
+
+fn default_success() -> bool {
+    true
 }
 
 /// A single model entry from the dynamic model list.
@@ -189,4 +231,50 @@ pub fn parse_line(line: &str) -> AgentMessage {
 pub enum UiEvent {
     Agent(AgentMessage),
     SpawnError(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_prompt_command_with_request_id() {
+        let command = CommandPayload::Prompt {
+            id: "prompt-7".into(),
+            content: "hello".into(),
+        };
+
+        let json = serde_json::to_value(command).unwrap();
+
+        assert_eq!(json["type"], "prompt");
+        assert_eq!(json["id"], "prompt-7");
+        assert_eq!(json["content"], "hello");
+    }
+
+    #[test]
+    fn parses_terminal_agent_end_contract() {
+        let msg = parse_line(r#"{"type":"agent_end","id":"prompt-7","success":false,"error":"Agent busy"}"#);
+
+        match msg {
+            AgentMessage::Push(PushEvent::AgentEnd { id, success, error }) => {
+                assert_eq!(id.as_deref(), Some("prompt-7"));
+                assert!(!success);
+                assert_eq!(error.as_deref(), Some("Agent busy"));
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_provider_changed_event() {
+        let msg = parse_line(r#"{"type":"provider_changed","provider_id":"openrouter","provider_name":"OpenRouter"}"#);
+
+        match msg {
+            AgentMessage::Push(PushEvent::ProviderChanged { provider_id, provider_name }) => {
+                assert_eq!(provider_id, "openrouter");
+                assert_eq!(provider_name, "OpenRouter");
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
 }

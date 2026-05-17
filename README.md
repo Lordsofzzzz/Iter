@@ -70,6 +70,9 @@ cargo run --bin iter -- --model "google/gemini-2.5-pro" -C /path/to/project ask 
 ## Architecture
 
 The CLI and agent communicate via JSONL over stdin/stdout.
+Commands carry an `id`; responses and terminal turn events echo that `id`.
+A submitted prompt is complete only after `agent_end` with `{ success: true }`
+or `{ success: false, error }`.
 
 Push events from the agent include:
 

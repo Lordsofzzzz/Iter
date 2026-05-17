@@ -16,12 +16,12 @@ import { logToFile } from './utils/logger.js';
 /** Unprompted events from the agent. Identified by absence of `kind` field. */
 export type PushEvent =
   | { type: 'agent_start' }
-  | { type: 'turn_start' }
+  | { type: 'turn_start'; id?: string }
   | { type: 'text_delta'; delta: string }
   | { type: 'thinking_delta'; delta: string }
-  | { type: 'turn_end' }
-  | { type: 'agent_end' }
-  | { type: 'error'; message: string }
+  | { type: 'turn_end'; id?: string }
+  | { type: 'agent_end'; id?: string; success: boolean; error?: string }
+  | { type: 'error'; id?: string; message: string }
   | { type: 'cooldown'; wait_ms: number; retries_left: number }
   | { type: 'retry_result'; success: boolean; attempt: number }
   | { type: 'auto_retry_start'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
@@ -35,6 +35,16 @@ export type PushEvent =
 // Pull Responses: TUI → Agent → TUI
 // ============================================================================
 
+export type CommandPayload =
+  | { type: 'get_state'; id: string }
+  | { type: 'get_session_stats'; id: string }
+  | { type: 'set_provider'; id: string; provider: string }
+  | { type: 'set_model'; id: string; model: string }
+  | { type: 'prompt'; id: string; content: string }
+  | { type: 'message'; id: string; content: string }
+  | { type: 'abort'; id: string }
+  | { type: 'clear'; id: string };
+
 /** Response to a TUI command. Always has `kind: "response"`. */
 export type PullResponse =
   | { kind: 'response'; command: 'get_state';         id?: string; success: true;  data: StateData }
@@ -42,7 +52,8 @@ export type PullResponse =
   | { kind: 'response'; command: 'prompt';            id?: string; success: true }
   | { kind: 'response'; command: 'abort';             id?: string; success: true }
   | { kind: 'response'; command: 'clear';             id?: string; success: true }
-  | { kind: 'response'; command: 'set_model';        id?: string; success: true;  data: { model_name: string; model_limit: number } }
+  | { kind: 'response'; command: 'set_provider';      id?: string; success: true;  data: { provider: string; model?: string } }
+  | { kind: 'response'; command: 'set_model';         id?: string; success: true;  data: { model_name: string; model_limit: number } }
   | { kind: 'response'; command: string;              id?: string; success: false; error: string };
 
 // ============================================================================
@@ -103,6 +114,68 @@ export function emitEvent(event: PushEvent): void {
 /** Emits a pull response to the TUI. */
 export function emitResponse(response: PullResponse): void {
   writeLine(response);
+}
+
+// ============================================================================
+// Command Parsing
+// ============================================================================
+
+export function parseCommandPayload(value: unknown): CommandPayload {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('command must be an object');
+  }
+
+  const raw = value as Record<string, unknown>;
+  const type = raw.type;
+  if (typeof type !== 'string') {
+    throw new Error('type field required');
+  }
+
+  const id = raw.id;
+  if (typeof id !== 'string' || id.trim() === '') {
+    throw new Error('id field required');
+  }
+
+  switch (type) {
+    case 'get_state':
+    case 'get_session_stats':
+    case 'abort':
+    case 'clear':
+      return { type, id } as CommandPayload;
+
+    case 'set_provider':
+      if (typeof raw.provider !== 'string' || raw.provider.trim() === '') {
+        throw new Error('provider field required');
+      }
+      return { type, id, provider: raw.provider };
+
+    case 'set_model':
+      if (typeof raw.model !== 'string' || raw.model.trim() === '') {
+        throw new Error('model field required');
+      }
+      return { type, id, model: raw.model };
+
+    case 'prompt':
+    case 'message':
+      if (typeof raw.content !== 'string') {
+        throw new Error('content must be a string');
+      }
+      return { type, id, content: raw.content };
+
+    default:
+      throw new Error(`Unknown command: ${type}`);
+  }
+}
+
+export function commandMetadata(value: unknown): { id?: string; command: string } {
+  if (typeof value !== 'object' || value === null) {
+    return { command: 'unknown' };
+  }
+  const raw = value as Record<string, unknown>;
+  return {
+    id: typeof raw.id === 'string' ? raw.id : undefined,
+    command: typeof raw.type === 'string' ? raw.type : 'unknown',
+  };
 }
 
 // ============================================================================

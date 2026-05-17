@@ -42,6 +42,7 @@ export class LLMClient {
   private readonly stats           = new Stats();
   private abortController: AbortController | null = null;
   private cachedSystemPrompt: string | null = null;
+  private activeRequestId: string | undefined;
   // Session-level retry counter — lives outside the loop, resets on success (pi pattern)
   private _retryAttempt = 0;
 
@@ -113,11 +114,19 @@ export class LLMClient {
     this.cachedSystemPrompt = null; // refresh git branch etc. on next turn
   }
 
-  async streamResponse(userMessage: string, model?: string): Promise<void> {
+  async streamResponse(userMessage: string, model?: string, requestId?: string): Promise<void> {
+    this.activeRequestId = requestId;
+    let success = true;
+    let terminalError: string | undefined;
+
     if (model) this.setModel(model);
 
     if (!this._model) {
-      emitEvent({ type: 'error', message: 'No model selected. Use /model <name> to set one.' });
+      success = false;
+      terminalError = 'No model selected. Use /model <name> to set one.';
+      emitEvent({ type: 'error', id: requestId, message: terminalError });
+      emitEvent({ type: 'agent_end', id: requestId, success, error: terminalError });
+      this.activeRequestId = undefined;
       return;
     }
 
@@ -165,10 +174,10 @@ export class LLMClient {
           .reverse()
           .find((m): m is AssistantMessage => m.role === 'assistant');
 
-        if (lastAssistant?.stopReason === 'error') {
-          const errMsg = lastAssistant.errorMessage ?? 'unknown';
+        if (lastAssistant?.stopReason === 'error' || lastAssistant?.stopReason === 'aborted') {
+          const errMsg = lastAssistant.errorMessage ?? (lastAssistant.stopReason === 'aborted' ? 'Aborted' : 'unknown');
 
-          if (this._retryAttempt < maxRetries && isGenericRetryable(0, errMsg)) {
+          if (lastAssistant.stopReason === 'error' && this._retryAttempt < maxRetries && isGenericRetryable(0, errMsg)) {
             this._retryAttempt++;
             const delayMs = retryCfg.baseDelayMs * Math.pow(2, this._retryAttempt - 1);
 
@@ -197,7 +206,9 @@ export class LLMClient {
           if (this._retryAttempt > 0) {
             emitEvent({ type: 'auto_retry_end', success: false, attempt: this._retryAttempt, finalError: errMsg });
           }
-          emitEvent({ type: 'error', message: `LLM error: ${errMsg}` });
+          success = false;
+          terminalError = `LLM error: ${errMsg}`;
+          emitEvent({ type: 'error', id: requestId, message: terminalError });
         } else if (this._retryAttempt > 0) {
           emitEvent({ type: 'auto_retry_end', success: true, attempt: this._retryAttempt });
         }
@@ -210,11 +221,13 @@ export class LLMClient {
     } catch (error: unknown) {
       this._retryAttempt = 0;
       const isAbort = (error as Error)?.name === 'AbortError';
-      if (!isAbort) {
-        emitEvent({ type: 'error', message: `LLM error: ${extractErrorMessage(error)}` });
-      }
+      success = false;
+      terminalError = isAbort ? 'Aborted' : `LLM error: ${extractErrorMessage(error)}`;
+      if (!isAbort) emitEvent({ type: 'error', id: requestId, message: terminalError });
     } finally {
       this.abortController = null;
+      emitEvent({ type: 'agent_end', id: requestId, success, ...(terminalError ? { error: terminalError } : {}) });
+      this.activeRequestId = undefined;
     }
   }
 
@@ -228,7 +241,7 @@ export class LLMClient {
         break;
 
       case 'turn_start':
-        emitEvent({ type: 'turn_start' });
+        emitEvent({ type: 'turn_start', id: this.activeRequestId });
         break;
 
       case 'message_update':
@@ -264,11 +277,10 @@ export class LLMClient {
       }
 
       case 'turn_end':
+        emitEvent({ type: 'turn_end', id: this.activeRequestId });
         break;
 
       case 'agent_end':
-        emitEvent({ type: 'turn_end' });
-        emitEvent({ type: 'agent_end' });
         break;
     }
   }

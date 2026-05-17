@@ -7,6 +7,8 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::thread;
 
+use serde::Serialize;
+
 use crate::rpc::{self, AgentMessage, PushEvent, UiEvent};
 use crate::state::State;
 
@@ -75,9 +77,11 @@ pub fn spawn_agent(tx: Sender<UiEvent>, config: &AgentConfig) -> Option<std::pro
     Some(stdin)
 }
 
-pub fn send_cmd(stdin: &mut Option<std::process::ChildStdin>, payload: serde_json::Value) {
+pub fn send_cmd<T: Serialize>(stdin: &mut Option<std::process::ChildStdin>, payload: T) {
     if let Some(ref mut s) = stdin {
-        let _ = writeln!(s, "{payload}");
+        if let Ok(line) = serde_json::to_string(&payload) {
+            let _ = writeln!(s, "{line}");
+        }
     }
 }
 
@@ -90,6 +94,13 @@ pub fn handle_agent_msg_state(
         AgentMessage::Push(ev) => match ev {
             PushEvent::ModelList { models } => {
                 state.models = models.into_iter().map(|m| (m.id, m.name)).collect();
+            }
+            PushEvent::ProviderChanged { provider_id, provider_name } => {
+                state.provider_name = if provider_name.is_empty() {
+                    provider_id
+                } else {
+                    provider_name
+                };
             }
             _ => {}
         },
