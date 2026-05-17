@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use crossterm::style::{self, Attribute, Color, Stylize};
+use crossterm::terminal;
 
 use cli::{Cli, Command};
 use input::{InputBox, InputResult};
@@ -436,45 +437,78 @@ fn tool_human_label(name: &str, input: &str) -> String {
     }
 }
 
+const TAIL_LINES: usize = 12;
+const OVERFLOW_THRESHOLD: usize = 2000;
+
 fn print_tool_call(name: &str, input: &str) {
     let label = tool_human_label(name, input);
+    let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
+    let tag = format!(" {} ", name);
+    let inner = cols.saturating_sub(2); // inside the box borders
+    let label_len = label.chars().count();
+    let tag_len = tag.chars().count();
+    let gap = inner.saturating_sub(1 + label_len + tag_len);
+
+    println!();
+    // header row: ┌ command ··· tag ┐
     println!(
-        "\n  {}",
-        label.with(Color::Cyan),
+        "{}{}{}{}{}",
+        "┌".with(Color::DarkGrey),
+        format!(" {}", label).with(Color::White).bold(),
+        " ".repeat(gap).with(Color::DarkGrey),
+        tag.with(Color::DarkCyan),
+        "┐".with(Color::DarkGrey),
     );
 }
 
-fn print_tool_result(name: &str, output: &str, elapsed_ms: u64) {
+fn print_tool_result(_name: &str, output: &str, elapsed_ms: u64) {
     let elapsed = if elapsed_ms >= 1000 {
         format!("{:.1}s", elapsed_ms as f64 / 1000.0)
     } else {
         format!("{}ms", elapsed_ms)
     };
 
+    let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
+    let inner = cols.saturating_sub(2);
+    let all_lines: Vec<&str> = output.lines().collect();
+    let total = all_lines.len();
+
+    let bar_l = "│".with(Color::DarkGrey);
+    let bar_r = "│".with(Color::DarkGrey);
+
+    // overflow warning
+    if total > OVERFLOW_THRESHOLD {
+        let msg = format!("[Truncated: showing {} of {} lines]", TAIL_LINES, total);
+        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
+        println!("{} {}{}{}", bar_l, msg.with(Color::DarkYellow), pad, bar_r);
+    }
+
+    // top truncation hint
+    if total > TAIL_LINES {
+        let msg = format!("... ({} earlier lines)", total - TAIL_LINES);
+        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
+        println!("{} {}{}{}", bar_l, msg.with(Color::DarkGrey), pad, bar_r);
+    }
+
+    // tail lines
+    let tail = &all_lines[total.saturating_sub(TAIL_LINES)..];
+    for line in tail {
+        let truncated = truncate_chars(line, inner.saturating_sub(2));
+        let pad = " ".repeat(inner.saturating_sub(1 + truncated.chars().count()));
+        println!("{} {}{}{}", bar_l, truncated.with(Color::Grey), pad, bar_r);
+    }
+
+    // bottom border + timing
+    let took = format!(" Took {} ", elapsed);
+    let border_fill = inner.saturating_sub(took.chars().count());
     println!(
-        "  {} {} · {}",
-        "✓".with(Color::DarkGreen),
-        name.with(Color::DarkGrey),
-        elapsed.with(Color::DarkGrey),
+        "{}{}{}{}",
+        "└".with(Color::DarkGrey),
+        took.with(Color::DarkGrey),
+        "─".repeat(border_fill).with(Color::DarkGrey),
+        "┘".with(Color::DarkGrey),
     );
-
-    let lines: Vec<&str> = output.lines().take(8).collect();
-    let preview = format_tool_output(&lines.join("\n"));
-    for line in preview.lines() {
-        println!("    {}", line);
-    }
-    if output.lines().count() > 8 {
-        println!("    {}", format!("… +{} lines", output.lines().count() - 8).with(Color::DarkGrey));
-    }
     println!();
-}
-
-fn format_tool_output(raw: &str) -> String {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(raw) {
-        serde_json::to_string_pretty(&val).unwrap_or_else(|_| raw.to_string())
-    } else {
-        raw.to_string()
-    }
 }
 
 fn print_status(msg: &str, color: Color) {
