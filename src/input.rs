@@ -3,6 +3,10 @@
 //! Draws a 3-row box wherever the cursor currently is and redraws in-place.
 //! No alternate screen, no scroll regions, no pinning to bottom.
 //! Output flows naturally below the box after submit.
+//!
+//! Slash-command mode: when the buffer starts with `/`, an overlay is rendered
+//! above the input box listing matching commands. Arrow keys / Tab navigate;
+//! Enter or Tab completes; Escape cancels without clearing the buffer.
 
 use std::io::{self, Write};
 
@@ -19,6 +23,22 @@ use crate::state::State;
 const PROMPT: &str = "❯ ";
 const BOX_ROWS: u16 = 2;
 
+// ── Slash commands ────────────────────────────────────────────────────────────
+
+/// (command, description)
+const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("/model",    "switch the active model"),
+    ("/provider", "switch the active provider"),
+    ("/clear",    "clear conversation history"),
+    ("/abort",    "abort the current request"),
+    ("/help",     "show available commands"),
+];
+
+/// Maximum number of items shown in the overlay at once.
+const MAX_VISIBLE: usize = 5;
+
+// ── Public types ──────────────────────────────────────────────────────────────
+
 pub enum InputResult {
     Submit(String),
     Quit,
@@ -26,8 +46,65 @@ pub enum InputResult {
 }
 
 pub struct InputBox {
-    buf: String,
+    buf:    String,
     cursor: usize,
+    /// Slash-command picker state. `None` when not in slash mode.
+    slash:  Option<SlashState>,
+    /// Number of overlay rows drawn in the last frame (used to erase stale overlay).
+    prev_overlay_rows: u16,
+}
+
+// ── Private types ─────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct SlashState {
+    /// Currently highlighted index within `matches`.
+    selected: usize,
+    /// Filtered list of (command, description) matching the current prefix.
+    matches:  Vec<(&'static str, &'static str)>,
+}
+
+impl SlashState {
+    fn new(prefix: &str) -> Self {
+        Self {
+            selected: 0,
+            matches:  Self::filter(prefix),
+        }
+    }
+
+    fn update(&mut self, prefix: &str) {
+        self.matches  = Self::filter(prefix);
+        self.selected = self.selected.min(self.matches.len().saturating_sub(1));
+    }
+
+    fn filter(prefix: &str) -> Vec<(&'static str, &'static str)> {
+        let p = prefix.to_ascii_lowercase();
+        SLASH_COMMANDS
+            .iter()
+            .filter(|(cmd, _)| cmd.to_ascii_lowercase().starts_with(p.as_str()))
+            .copied()
+            .collect()
+    }
+
+    fn selected_cmd(&self) -> Option<&'static str> {
+        self.matches.get(self.selected).map(|(cmd, _)| *cmd)
+    }
+
+    fn move_up(&mut self) {
+        if !self.matches.is_empty() {
+            if self.selected == 0 {
+                self.selected = self.matches.len() - 1;
+            } else {
+                self.selected -= 1;
+            }
+        }
+    }
+
+    fn move_down(&mut self) {
+        if !self.matches.is_empty() {
+            self.selected = (self.selected + 1) % self.matches.len();
+        }
+    }
 }
 
 struct RawModeGuard;
@@ -45,11 +122,15 @@ impl Drop for RawModeGuard {
     }
 }
 
+// ── InputBox impl ─────────────────────────────────────────────────────────────
+
 impl InputBox {
     pub fn new() -> Self {
         Self {
-            buf: String::new(),
+            buf:    String::new(),
             cursor: 0,
+            slash:  None,
+            prev_overlay_rows: 0,
         }
     }
 
@@ -62,27 +143,33 @@ impl InputBox {
 
         match &result {
             InputResult::Submit(_) => {
-                // Clear the status line before locking
+                // Clear slash overlay rows before locking the box.
+                self.erase_slash_overlay()?;
+
                 let mut out = io::stderr();
                 out.queue(cursor::RestorePosition)?;
                 out.queue(cursor::MoveDown(BOX_ROWS + 1))?;
                 out.queue(cursor::MoveToColumn(0))?;
                 out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
                 out.flush()?;
-                
+
                 self.draw_locked()?;
                 self.move_below_box()?;
                 self.buf.clear();
                 self.cursor = 0;
+                self.slash = None;
+                self.prev_overlay_rows = 0;
             }
             _ => {
+                self.erase_slash_overlay()?;
                 self.erase()?;
                 self.buf.clear();
                 self.cursor = 0;
+                self.slash = None;
+                self.prev_overlay_rows = 0;
             }
         }
 
-        // Restore default cursor style
         let mut out = io::stderr();
         out.queue(cursor::SetCursorStyle::DefaultUserShape)?;
         out.flush()?;
@@ -90,9 +177,8 @@ impl InputBox {
         Ok(result)
     }
 
-fn reserve(&self, state: &State) -> io::Result<()> {
+    fn reserve(&mut self, state: &State) -> io::Result<()> {
         let mut out = io::stderr();
-        // Reserve an extra row for the status line
         for _ in 0..(BOX_ROWS + 1) {
             out.queue(style::Print("\n"))?;
         }
@@ -106,11 +192,45 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         Ok(())
     }
 
+    // ── Event loop ────────────────────────────────────────────────────────────
+
     fn event_loop(&mut self, state: &State) -> io::Result<InputResult> {
         loop {
             match event::read()? {
                 Event::Key(KeyEvent { code, modifiers, .. }) => {
                     match (code, modifiers) {
+                        // ── Slash-mode navigation ──────────────────────────
+                        (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
+                            if self.slash.is_some() =>
+                        {
+                            self.slash.as_mut().unwrap().move_up();
+                        }
+
+                        (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL)
+                            if self.slash.is_some() =>
+                        {
+                            self.slash.as_mut().unwrap().move_down();
+                        }
+
+                        (KeyCode::Tab, _) | (KeyCode::Enter, _)
+                            if self.slash.is_some()
+                                && self.slash.as_ref().unwrap().matches.len() > 0 =>
+                        {
+                            // Complete the selected command.
+                            if let Some(cmd) = self.slash.as_ref().unwrap().selected_cmd() {
+                                // Replace buffer with completed command + space.
+                                self.buf = format!("{cmd} ");
+                                self.cursor = self.buf.len();
+                                self.slash = None;
+                            }
+                        }
+
+                        (KeyCode::Esc, _) if self.slash.is_some() => {
+                            // Dismiss overlay, keep buffer as-is.
+                            self.slash = None;
+                        }
+
+                        // ── Normal Enter (submit) ──────────────────────────
                         (KeyCode::Enter, _) => {
                             let text = self.buf.trim().to_string();
                             if text.is_empty() {
@@ -118,6 +238,8 @@ fn reserve(&self, state: &State) -> io::Result<()> {
                             }
                             return Ok(InputResult::Submit(text));
                         }
+
+                        // ── Quit / abort ───────────────────────────────────
                         (KeyCode::Char('c'), KeyModifiers::CONTROL)
                         | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
                             return Ok(InputResult::Quit);
@@ -125,11 +247,17 @@ fn reserve(&self, state: &State) -> io::Result<()> {
                         (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
                             return Ok(InputResult::Abort);
                         }
+
+                        // ── Editing ────────────────────────────────────────
                         (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
                             self.buf.clear();
                             self.cursor = 0;
+                            self.slash = None;
                         }
-                        (KeyCode::Char('w'), KeyModifiers::CONTROL) => self.delete_word_back(),
+                        (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
+                            self.delete_word_back();
+                            self.sync_slash();
+                        }
                         (KeyCode::Char('a'), KeyModifiers::CONTROL) | (KeyCode::Home, _) => {
                             self.cursor = 0;
                         }
@@ -142,13 +270,20 @@ fn reserve(&self, state: &State) -> io::Result<()> {
                         (KeyCode::Right, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
                             self.move_right();
                         }
-                        (KeyCode::Backspace, _) => self.backspace(),
-                        (KeyCode::Delete, _) => self.delete_forward(),
+                        (KeyCode::Backspace, _) => {
+                            self.backspace();
+                            self.sync_slash();
+                        }
+                        (KeyCode::Delete, _) => {
+                            self.delete_forward();
+                            self.sync_slash();
+                        }
                         (KeyCode::Char(c), mods)
                             if !mods.contains(KeyModifiers::CONTROL)
                                 && !mods.contains(KeyModifiers::ALT) =>
                         {
                             self.insert(c);
+                            self.sync_slash();
                         }
                         _ => {}
                     }
@@ -162,34 +297,53 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         }
     }
 
-    fn draw(&self, state: Option<&State>) -> io::Result<()> {
+    // ── Slash sync ────────────────────────────────────────────────────────────
+
+    /// After every buffer mutation, re-sync slash mode.
+    fn sync_slash(&mut self) {
+        if self.buf.starts_with('/') {
+            match self.slash.as_mut() {
+                Some(s) => s.update(&self.buf),
+                None    => self.slash = Some(SlashState::new(&self.buf)),
+            }
+        } else {
+            self.slash = None;
+        }
+    }
+
+    // ── Drawing ───────────────────────────────────────────────────────────────
+
+    fn draw(&mut self, state: Option<&State>) -> io::Result<()> {
         let mut out = io::stderr();
-        let cols = usize::from(terminal::size().unwrap_or((80, 24)).0).max(1);
+        let cols          = usize::from(terminal::size().unwrap_or((80, 24)).0).max(1);
         let content_width = cols.saturating_sub(4);
-        let input_width = content_width.saturating_sub(UnicodeWidthStr::width(PROMPT));
+        let input_width   = content_width.saturating_sub(UnicodeWidthStr::width(PROMPT));
         let (visible, cursor_col) = self.visible_slice(input_width);
-        let visible_width = UnicodeWidthStr::width(visible.as_str());
-        let prompt_width = UnicodeWidthStr::width(PROMPT);
+        let visible_width  = UnicodeWidthStr::width(visible.as_str());
+        let prompt_width   = UnicodeWidthStr::width(PROMPT);
 
         out.queue(cursor::Hide)?;
         out.queue(cursor::RestorePosition)?;
 
+        // ── Top border ────────────────────────────────────────────────────
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(style::PrintStyledContent(
             border_line('╭', '╮', "", cols).with(Color::DarkGreen),
         ))?;
 
+        // ── Input row ─────────────────────────────────────────────────────
         out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(style::PrintStyledContent("│ ".with(Color::DarkGreen)))?;
         out.queue(style::PrintStyledContent(PROMPT.with(Color::Green)))?;
         if visible.is_empty() {
-            let hint = "describe your task…";
-            let hint_width = UnicodeWidthStr::width(hint).min(input_width);
-            out.queue(style::PrintStyledContent(
-                hint[..hint.char_indices().nth(hint_width).map(|(i,_)| i).unwrap_or(hint.len())]
-                    .with(Color::DarkGrey)
-            ))?;
+            let hint        = "describe your task…";
+            let hint_width  = UnicodeWidthStr::width(hint).min(input_width);
+            let cut         = hint.char_indices()
+                .nth(hint_width)
+                .map(|(i, _)| i)
+                .unwrap_or(hint.len());
+            out.queue(style::PrintStyledContent(hint[..cut].with(Color::DarkGrey)))?;
             out.queue(style::Print(" ".repeat(input_width.saturating_sub(hint_width))))?;
         } else {
             out.queue(style::Print(&visible))?;
@@ -197,24 +351,152 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         }
         out.queue(style::PrintStyledContent(" │".with(Color::DarkGreen)))?;
 
+        // ── Bottom border ─────────────────────────────────────────────────
         out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(style::PrintStyledContent(
             border_line('╰', '╯', "", cols).with(Color::DarkGrey),
         ))?;
 
+        // ── Status line (row: RestorePosition + 3) ────────────────────────
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
         if let Some(st) = state {
-            out.queue(cursor::MoveDown(1))?;
-            out.queue(cursor::MoveToColumn(0))?;
-            out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
             self.draw_status_line_internal(&mut out, st)?;
-            out.queue(cursor::MoveUp(1))?;
         }
 
-        out.queue(cursor::MoveUp(1))?;
+        // ── Slash overlay (rows: RestorePosition + 4 … +4+N) ─────────────
+        // Erase previous overlay rows (below status line), then redraw if still active.
+        let old_overlay_rows = self.prev_overlay_rows;
+        if old_overlay_rows > 0 {
+            for _ in 0..old_overlay_rows {
+                out.queue(cursor::MoveDown(1))?;
+                out.queue(cursor::MoveToColumn(0))?;
+                out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+            }
+            out.queue(cursor::MoveUp(old_overlay_rows))?;
+            out.queue(cursor::MoveToColumn(0))?;
+        }
+
+        let new_overlay_rows = if let Some(slash) = self.slash.clone() {
+            let count = slash.matches.len().min(MAX_VISIBLE);
+            if count > 0 {
+                // Cursor is at status line row; draw_slash_overlay starts one MoveDown below.
+                self.draw_slash_overlay(&mut out, &slash, cols)?;
+                count as u16 + 2 // top border + items + bottom border
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        self.prev_overlay_rows = new_overlay_rows;
+
+        // ── Restore cursor into input row ────────────────────────────────
+        // Cursor is at: status line row + new_overlay_rows (0 if no overlay drawn).
+        // Input row is RestorePosition+1 = status line row - 2.
+        out.queue(cursor::MoveUp(2 + new_overlay_rows))?;
         let cursor_x = (2 + prompt_width + cursor_col).min(cols.saturating_sub(1)) as u16;
         out.queue(cursor::MoveToColumn(cursor_x))?;
         out.queue(cursor::Show)?;
+        out.flush()
+    }
+
+    /// Draw the slash-command picker overlay below the input box.
+    ///
+    /// Called with cursor at the status line row (RestorePosition + 3).
+    /// Draws the overlay immediately below that row.
+    /// Returns with cursor still at the status line row.
+    fn draw_slash_overlay(
+        &self,
+        out:   &mut io::Stderr,
+        slash: &SlashState,
+        cols:  usize,
+    ) -> io::Result<()> {
+        let matches = &slash.matches;
+        if matches.is_empty() {
+            return Ok(());
+        }
+
+        let visible_count = matches.len().min(MAX_VISIBLE);
+
+        let scroll_start = if slash.selected >= visible_count {
+            slash.selected - visible_count + 1
+        } else {
+            0
+        };
+        let visible_slice = &matches[scroll_start..scroll_start + visible_count];
+
+        let cmd_col_width = visible_slice
+            .iter()
+            .map(|(cmd, _)| UnicodeWidthStr::width(*cmd))
+            .max()
+            .unwrap_or(8);
+
+        // Top border — one row below status line
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╭', '╮', " commands ", cols).with(Color::DarkCyan),
+        ))?;
+
+        for (i, (cmd, desc)) in visible_slice.iter().enumerate() {
+            let abs_idx     = scroll_start + i;
+            let is_selected = abs_idx == slash.selected;
+
+            out.queue(cursor::MoveDown(1))?;
+            out.queue(cursor::MoveToColumn(0))?;
+
+            let inner      = cols.saturating_sub(4);
+            let cmd_width  = UnicodeWidthStr::width(*cmd);
+            let gap        = cmd_col_width.saturating_sub(cmd_width) + 2;
+            let desc_avail = inner.saturating_sub(cmd_width + gap);
+            let desc_trunc = truncate_str(desc, desc_avail);
+            let desc_width = UnicodeWidthStr::width(desc_trunc.as_str());
+            let pad        = inner.saturating_sub(cmd_width + gap + desc_width);
+
+            out.queue(style::PrintStyledContent("│ ".with(Color::DarkCyan)))?;
+            if is_selected {
+                out.queue(style::PrintStyledContent(cmd.with(Color::White).bold()))?;
+                out.queue(style::Print(" ".repeat(gap)))?;
+                out.queue(style::PrintStyledContent(desc_trunc.as_str().with(Color::DarkGrey)))?;
+                out.queue(style::Print(" ".repeat(pad)))?;
+                out.queue(style::PrintStyledContent(" │".with(Color::DarkCyan)))?;
+            } else {
+                out.queue(style::PrintStyledContent(cmd.with(Color::Cyan)))?;
+                out.queue(style::Print(" ".repeat(gap)))?;
+                out.queue(style::PrintStyledContent(desc_trunc.as_str().with(Color::DarkGrey)))?;
+                out.queue(style::Print(" ".repeat(pad)))?;
+                out.queue(style::PrintStyledContent(" │".with(Color::DarkCyan)))?;
+            }
+        }
+
+        // Bottom border
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╰', '╯', "", cols).with(Color::DarkCyan),
+        ))?;
+        // Cursor is now at bottom of overlay. draw() will MoveUp back to input row.
+
+        Ok(())
+    }
+
+    /// Erase any rows the slash overlay occupies below the box.
+    fn erase_slash_overlay(&self) -> io::Result<()> {
+        if self.prev_overlay_rows == 0 {
+            return Ok(());
+        }
+        let mut out = io::stderr();
+        // RestorePosition = box top border. Status line = +3. Overlay starts at +4.
+        out.queue(cursor::RestorePosition)?;
+        out.queue(cursor::MoveDown(4))?;
+        for _ in 0..self.prev_overlay_rows {
+            out.queue(cursor::MoveToColumn(0))?;
+            out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+            out.queue(cursor::MoveDown(1))?;
+        }
         out.flush()
     }
 
@@ -258,12 +540,12 @@ fn reserve(&self, state: &State) -> io::Result<()> {
     }
 
     fn draw_locked(&self) -> io::Result<()> {
-        let mut out = io::stderr();
-        let cols = usize::from(terminal::size().unwrap_or((80, 24)).0).max(1);
+        let mut out    = io::stderr();
+        let cols          = usize::from(terminal::size().unwrap_or((80, 24)).0).max(1);
         let content_width = cols.saturating_sub(4);
-        let input_width = content_width.saturating_sub(UnicodeWidthStr::width(PROMPT));
-        let (visible, _) = self.visible_slice(input_width);
-        let visible_width = UnicodeWidthStr::width(visible.as_str());
+        let input_width   = content_width.saturating_sub(UnicodeWidthStr::width(PROMPT));
+        let (visible, _)  = self.visible_slice(input_width);
+        let visible_width  = UnicodeWidthStr::width(visible.as_str());
 
         out.queue(cursor::RestorePosition)?;
 
@@ -291,7 +573,7 @@ fn reserve(&self, state: &State) -> io::Result<()> {
 
     fn move_below_box(&self) -> io::Result<()> {
         let mut out = io::stderr();
-        out.queue(cursor::MoveDown(1))?; // start output where status line was
+        out.queue(cursor::MoveDown(1))?;
         out.queue(cursor::MoveToColumn(0))?;
         out.flush()
     }
@@ -299,7 +581,6 @@ fn reserve(&self, state: &State) -> io::Result<()> {
     fn erase(&self) -> io::Result<()> {
         let mut out = io::stderr();
         out.queue(cursor::RestorePosition)?;
-        // We need to clear the box (2 rows) + the status line (1 row) = 3 rows
         for _ in 0..(BOX_ROWS + 2) {
             out.queue(cursor::MoveToColumn(0))?;
             out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
@@ -309,13 +590,15 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         out.flush()
     }
 
+    // ── Text editing ──────────────────────────────────────────────────────────
+
     fn visible_slice(&self, avail: usize) -> (String, usize) {
         let chars: Vec<(usize, usize, char)> = self
             .buf
             .char_indices()
             .map(|(byte, ch)| (byte, UnicodeWidthChar::width(ch).unwrap_or(0), ch))
             .collect();
-        let total_width: usize = chars.iter().map(|(_, w, _)| *w).sum();
+        let total_width: usize      = chars.iter().map(|(_, w, _)| *w).sum();
         let cursor_display_col: usize = chars
             .iter()
             .take_while(|(b, _, _)| *b < self.cursor)
@@ -327,21 +610,17 @@ fn reserve(&self, state: &State) -> io::Result<()> {
         }
 
         let scroll_start_col = cursor_display_col.saturating_sub(avail * 2 / 3);
-        let mut source_col = 0usize;
-        let mut display_col = 0usize;
-        let mut visible = String::new();
-        let mut cursor_col = 0usize;
-        let mut cursor_set = false;
+        let mut source_col   = 0usize;
+        let mut display_col  = 0usize;
+        let mut visible      = String::new();
+        let mut cursor_col   = 0usize;
+        let mut cursor_set   = false;
 
         for (byte, width, ch) in &chars {
             let char_start = source_col;
             source_col += width;
-            if char_start < scroll_start_col {
-                continue;
-            }
-            if display_col + width > avail {
-                break;
-            }
+            if char_start < scroll_start_col { continue; }
+            if display_col + width > avail   { break; }
             if *byte == self.cursor && !cursor_set {
                 cursor_col = display_col;
                 cursor_set = true;
@@ -349,9 +628,7 @@ fn reserve(&self, state: &State) -> io::Result<()> {
             visible.push(*ch);
             display_col += width;
         }
-        if !cursor_set {
-            cursor_col = display_col;
-        }
+        if !cursor_set { cursor_col = display_col; }
         (visible, cursor_col)
     }
 
@@ -400,8 +677,9 @@ fn reserve(&self, state: &State) -> io::Result<()> {
     fn char_before_cursor(&self) -> char {
         self.buf[..self.cursor].chars().next_back().unwrap()
     }
-
 }
+
+// ── Free functions ─────────────────────────────────────────────────────────────
 
 fn format_tokens(n: u32) -> String {
     if n >= 1_000_000 {
@@ -422,4 +700,17 @@ fn border_line(left: char, right: char, label: &str, width: usize) -> String {
         return format!("{left}{}{right}", "─".repeat(inner));
     }
     format!("{left}─{label}{}{right}", "─".repeat(inner.saturating_sub(label_width + 1)))
+}
+
+/// Truncate `s` to at most `max_display_width` terminal columns.
+fn truncate_str(s: &str, max_display_width: usize) -> String {
+    let mut width  = 0usize;
+    let mut result = String::new();
+    for ch in s.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + w > max_display_width { break; }
+        result.push(ch);
+        width += w;
+    }
+    result
 }
