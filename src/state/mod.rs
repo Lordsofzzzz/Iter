@@ -18,6 +18,8 @@ pub struct State {
     pub pending_tool_call:   Option<(String, String)>,
     pub tool_start_time:     Option<Instant>,
     pub show_thinking:       bool,
+    pub cost_input_per_mtok:  f64,
+    pub cost_output_per_mtok: f64,
 }
 
 impl State {
@@ -37,6 +39,8 @@ impl State {
             pending_tool_call:  None,
             tool_start_time:    None,
             show_thinking:      false,
+            cost_input_per_mtok:  0.0,
+            cost_output_per_mtok: 0.0,
         }
     }
 }

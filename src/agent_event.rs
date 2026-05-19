@@ -28,5 +28,6 @@ pub enum TuiCommand {
     Abort,
     SetModel(String),
     SetProvider(String),
+    SetProviderWithKey { provider: String, key: String },
     Clear,
 }

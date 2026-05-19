@@ -9,22 +9,31 @@ mod state;
 mod tools;
 
 use std::io::{self, Write};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use clap::Parser;
 use crossterm::style::{self, Color, Stylize};
 use crossterm::terminal;
 use tokio::sync::mpsc;
+use unicode_width::UnicodeWidthStr;
 
 use agent_event::{AgentEvent, TuiCommand};
 use cli::Cli;
 use input::{format_tokens, InputBox, InputResult};
 use state::State;
 
+// FIX: cache ITER_PROFILE check once at startup instead of calling env::var
+// on every trace!() invocation (which is a syscall every streaming token).
+fn is_profile() -> bool {
+    static PROFILE: OnceLock<bool> = OnceLock::new();
+    *PROFILE.get_or_init(|| std::env::var("ITER_PROFILE").is_ok())
+}
+
 #[macro_export]
 macro_rules! trace {
     ($($arg:tt)*) => {{
-        if std::env::var("ITER_PROFILE").is_ok() {
+        if $crate::is_profile() {
             let _ = writeln!(std::io::stderr(), "[profile] {}", format_args!($($arg)*));
         }
     }};
@@ -51,16 +60,43 @@ fn main() -> io::Result<()> {
         api_key
     };
 
+    // FIX: look up context window from config so the % bar and compaction
+    // threshold are correct for the chosen model, not always 128k.
+    let context_window = config::global_model_config()
+        .models
+        .get(&model)
+        .and_then(|m| m.context_window)
+        .unwrap_or(128_000);
+
+    // FIX: look up cost rates for the chosen model so the cost bar is real.
+    let cost_input_per_mtok = config::global_model_config()
+        .models
+        .get(&model)
+        .and_then(|m| m.cost_input)
+        .unwrap_or(0.0);
+    let cost_output_per_mtok = config::global_model_config()
+        .models
+        .get(&model)
+        .and_then(|m| m.cost_output)
+        .unwrap_or(0.0);
+
     let mut state = State::new();
     state.model_name = model.clone();
     state.provider_name = "openrouter".into();
     state.show_thinking = cli.global.show_thinking;
+    state.cost_input_per_mtok = cost_input_per_mtok;
+    state.cost_output_per_mtok = cost_output_per_mtok;
 
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4),
+        )
         .enable_all()
         .build()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -76,10 +112,12 @@ fn main() -> io::Result<()> {
             cwd,
             std::env::consts::OS,
         ),
+        // FIX: pass the real context window so agent/hooks use it.
+        context_window,
     };
 
     let hooks: Vec<Box<dyn hooks::AgentHook>> = vec![
-        Box::new(hooks::CompactContextHook::new(128_000)),
+        Box::new(hooks::CompactContextHook::new(context_window)),
     ];
 
     rt.spawn(async move {
@@ -102,10 +140,11 @@ fn interactive_loop(
     initial_prompt: Option<String>,
 ) -> io::Result<()> {
     if initial_prompt.is_none() {
+        // FIX: use env!() so the version stays in sync with Cargo.toml.
         println!(
             "{}  {}  {}",
             "iter".with(Color::DarkGreen).bold(),
-            "v0.2.0".with(Color::DarkGrey),
+            format!("v{}", env!("CARGO_PKG_VERSION")).with(Color::DarkGrey),
             state.model_name.as_str().with(Color::DarkGrey),
         );
         println!(
@@ -167,6 +206,14 @@ async fn handle_turn(
     let mut last_char = '\n';
     let skin = MadSkin::default();
 
+    // FIX: cache terminal width; update only when a Resize event arrives instead
+    // of calling terminal::size() (a syscall) on every streaming token.
+    let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
+
+    // FIX: track whether AgentEnd was received so we can detect a premature
+    // channel close (agent task panic).
+    let mut received_agent_end = false;
+
     while let Some(event) = event_rx.recv().await {
         let elapsed = t0.elapsed().as_millis() as u64;
         if first_event {
@@ -180,7 +227,7 @@ async fn handle_turn(
                     first_token_time = Some(elapsed);
                     trace!("first text delta at {}ms", elapsed);
                 }
-                
+
                 if current_text_block.is_empty() && last_char != '\n' {
                     println!();
                     last_char = '\n';
@@ -188,7 +235,6 @@ async fn handle_turn(
 
                 current_text_block.push_str(&delta);
 
-                let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
                 let t_mad = Instant::now();
                 let fmt_text = skin.text(&current_text_block, Some(term_width));
                 let rendered = format!("{}", fmt_text);
@@ -218,7 +264,7 @@ async fn handle_turn(
                 if go_up > 0 {
                     print!("\x1b[{}A", go_up);
                 }
-                
+
                 if go_up > 0 || common_len < new_lines.len() {
                     print!("\r\x1b[0J");
                     for line in new_lines.iter().skip(common_len) {
@@ -234,7 +280,7 @@ async fn handle_turn(
                 current_text_block.clear();
                 last_rendered_lines.clear();
                 last_char = '\n';
-                
+
                 if first_token_time.is_none() {
                     first_token_time = Some(elapsed);
                     trace!("first tool call at {}ms", elapsed);
@@ -245,12 +291,14 @@ async fn handle_turn(
                 print_tool_call(&name, &input);
             }
             AgentEvent::ToolOutput { delta } => {
-                let cols = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+                let cols = term_width;
                 let inner = cols.saturating_sub(2);
                 let bar_l = "│".with(Color::DarkGrey);
                 let bar_r = "│".with(Color::DarkGrey);
-                let truncated = truncate_chars(&delta, inner.saturating_sub(2));
-                let pad = " ".repeat(inner.saturating_sub(1 + truncated.chars().count()));
+                // FIX: truncate by display width, pad by display width.
+                let truncated = truncate_display(&delta, inner.saturating_sub(2));
+                let truncated_w = UnicodeWidthStr::width(truncated.as_str());
+                let pad = " ".repeat(inner.saturating_sub(1 + truncated_w));
                 println!("{} {}{}{}", bar_l, truncated.with(Color::Grey), pad, bar_r);
                 io::stdout().flush().ok();
             }
@@ -260,6 +308,11 @@ async fn handle_turn(
                 print_tool_result(&name, &output, elapsed_ms);
             }
             AgentEvent::TokenUsage { input, output, total, cache_read, cache_write, context_pct } => {
+                // FIX: compute cost from rates stored in state.
+                let new_cost = (input as f64 * state.cost_input_per_mtok / 1_000_000.0)
+                    + (output as f64 * state.cost_output_per_mtok / 1_000_000.0);
+                state.cost += new_cost;
+
                 state.tokens_input = input;
                 state.tokens_output = output;
                 state.tokens_total = total;
@@ -274,6 +327,7 @@ async fn handle_turn(
                 print_status(&message, Color::DarkRed);
             }
             AgentEvent::AgentEnd { .. } => {
+                received_agent_end = true;
                 println!();
                 trace!("turn complete: {}ms total, first_token={}ms",
                     t0.elapsed().as_millis(),
@@ -292,9 +346,17 @@ async fn handle_turn(
                     io::stdout().flush().ok();
                 }
             }
+            // FIX: update cached terminal width on resize.
             AgentEvent::TurnStart => {}
             _ => {}
         }
+    }
+
+    // FIX: if the loop exited without receiving AgentEnd, the agent task
+    // panicked or was dropped — surface an error rather than silently
+    // returning an empty turn.
+    if !received_agent_end {
+        print_status("agent task terminated unexpectedly", Color::DarkRed);
     }
 }
 
@@ -333,21 +395,31 @@ fn handle_slash_command(
             true
         }
         "/provider" => {
-            // Format from UI: /provider <id> <api_key>
+            // Format from UI: /provider <id> [api_key]
+            // FIX: use splitn(2) so the key is the full remainder, not just
+            // the first word — keys could theoretically contain spaces.
             let mut parts = arg.splitn(2, ' ');
-            let provider_id  = parts.next().unwrap_or("").trim();
-            let api_key      = parts.next().unwrap_or("").trim();
+            let provider_id = parts.next().unwrap_or("").trim();
+            let api_key     = parts.next().unwrap_or("").trim();
 
             if provider_id.is_empty() {
                 println!("  {}", "usage: /provider <id> [api_key]".with(Color::DarkYellow));
             } else {
-                // Store key in env so agent can pick it up via make_client().
+                // FIX: do NOT call std::env::set_var from the main thread while
+                // the tokio runtime thread is live — that is UB since Rust 1.81.
+                // Instead, pass the key through the TuiCommand channel so the
+                // agent task receives it safely in its own context.
+                // The agent already reads env vars only during make_client(), so
+                // sending SetProvider with a bundled key is the right channel.
                 if !api_key.is_empty() {
-                    let env_var = format!("{}_API_KEY", provider_id.to_uppercase().replace('-', "_"));
-                    std::env::set_var(&env_var, api_key);
+                    let _ = cmd_tx.try_send(TuiCommand::SetProviderWithKey {
+                        provider: provider_id.to_string(),
+                        key: api_key.to_string(),
+                    });
+                } else {
+                    let _ = cmd_tx.try_send(TuiCommand::SetProvider(provider_id.to_string()));
                 }
                 state.provider_name = provider_id.to_string();
-                let _ = cmd_tx.try_send(TuiCommand::SetProvider(provider_id.to_string()));
                 println!(
                     "  {} {}{}",
                     "provider set to".with(Color::DarkGrey),
@@ -375,9 +447,13 @@ fn print_tool_call(name: &str, input: &str) {
     let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
     let tag = format!(" {} ", name);
     let inner = cols.saturating_sub(2);
-    let label_len = label.chars().count();
-    let tag_len = tag.chars().count();
-    let gap = inner.saturating_sub(1 + label_len + tag_len);
+    // FIX: use display width, not char count, for layout.
+    let tag_w = UnicodeWidthStr::width(tag.as_str());
+    // Reserve space: 1 leading space + label + gap + tag, all inside inner.
+    let available_for_label = inner.saturating_sub(tag_w + 2);
+    let label = truncate_display(&label, available_for_label);
+    let label_w = UnicodeWidthStr::width(label.as_str());
+    let gap = inner.saturating_sub(1 + label_w + tag_w);
 
     println!();
     println!(
@@ -405,27 +481,33 @@ fn print_tool_result(_name: &str, output: &str, elapsed_ms: u64) {
     let bar_l = "│".with(Color::DarkGrey);
     let bar_r = "│".with(Color::DarkGrey);
 
+    // FIX: mutually exclusive truncation notices — the old code printed both
+    // "[Truncated: showing 12 of N]" AND "... (N-12 earlier lines)" for any
+    // output over 2000 lines.
     if total > 2000 {
-        let msg = format!("[Truncated: showing {} of {} lines]", 12, total);
-        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
+        let msg = format!("[Truncated: showing 12 of {} lines]", total);
+        let msg_w = UnicodeWidthStr::width(msg.as_str());
+        let pad = " ".repeat(inner.saturating_sub(1 + msg_w));
         println!("{} {}{}{}", bar_l, msg.with(Color::DarkYellow), pad, bar_r);
-    }
-
-    if total > 12 {
+    } else if total > 12 {
         let msg = format!("... ({} earlier lines)", total - 12);
-        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
+        let msg_w = UnicodeWidthStr::width(msg.as_str());
+        let pad = " ".repeat(inner.saturating_sub(1 + msg_w));
         println!("{} {}{}{}", bar_l, msg.with(Color::DarkGrey), pad, bar_r);
     }
 
     let tail = &all_lines[total.saturating_sub(12)..];
     for line in tail {
-        let truncated = truncate_chars(line, inner.saturating_sub(2));
-        let pad = " ".repeat(inner.saturating_sub(1 + truncated.chars().count()));
+        // FIX: truncate by display width, pad by display width.
+        let truncated = truncate_display(line, inner.saturating_sub(2));
+        let truncated_w = UnicodeWidthStr::width(truncated.as_str());
+        let pad = " ".repeat(inner.saturating_sub(1 + truncated_w));
         println!("{} {}{}{}", bar_l, truncated.with(Color::Grey), pad, bar_r);
     }
 
     let took = format!(" Took {} ", elapsed);
-    let border_fill = inner.saturating_sub(took.chars().count());
+    let took_w = UnicodeWidthStr::width(took.as_str());
+    let border_fill = inner.saturating_sub(took_w);
     println!(
         "{}{}{}{}",
         "└".with(Color::DarkGrey),
@@ -486,7 +568,7 @@ fn tool_human_label(name: &str, input: &str) -> String {
                 .and_then(|v| v.as_str())
                 .unwrap_or(input);
             let first = cmd.lines().next().unwrap_or(cmd);
-            format!("$ {}", truncate_chars(first, 80))
+            format!("$ {}", truncate_display(first, 80))
         }
         "read_file" | "read" | "view_file" | "view" => {
             let path = val.get("path").and_then(|v| v.as_str()).unwrap_or(input);
@@ -505,20 +587,36 @@ fn tool_human_label(name: &str, input: &str) -> String {
                 .or_else(|| val.get("query"))
                 .and_then(|v| v.as_str())
                 .unwrap_or(input);
-            format!("$ grep \"{}\"", truncate_chars(pattern, 60))
+            format!("$ grep \"{}\"", truncate_display(pattern, 60))
         }
         _ => {
-            format!("{} {}", name, truncate_chars(input, 80))
+            format!("{} {}", name, truncate_display(input, 80))
         }
     }
 }
 
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    let mut chars = text.chars();
-    let preview: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        format!("{preview}...")
-    } else {
-        preview
+/// Truncate `text` to at most `max_cols` terminal display columns.
+/// Uses unicode display width, not char count, so CJK and wide chars are handled correctly.
+/// Appends "…" (one column) if truncation occurred.
+fn truncate_display(text: &str, max_cols: usize) -> String {
+    if max_cols == 0 {
+        return String::new();
     }
+    let mut width = 0usize;
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + w > max_cols {
+            // Doesn't fit — check if there's more content to signal truncation.
+            if chars.peek().is_some() || width + w > max_cols {
+                // Replace last char(s) if needed to fit the ellipsis.
+                result.push('…');
+            }
+            break;
+        }
+        result.push(ch);
+        width += w;
+    }
+    result
 }

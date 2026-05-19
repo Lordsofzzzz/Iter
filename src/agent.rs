@@ -28,6 +28,9 @@ pub struct AgentConfig {
     pub model: String,
     pub api_key: String,
     pub system_prompt: String,
+    /// Context window size for the starting model. Updated on SetProvider if
+    /// the agent is extended to look up the new model's config.
+    pub context_window: u32,
 }
 
 fn make_client(api_key: &str) -> openrouter::Client {
@@ -43,7 +46,8 @@ pub async fn run_agent_loop(
 ) {
     let mut client = make_client(&config.api_key);
 
-    let mut context = Context::new(128_000);
+    // Use the context window passed in from main (looked up from model config).
+    let mut context = Context::new(config.context_window);
     let mut current_model = config.model.clone();
     let abort = Arc::new(AtomicBool::new(false));
 
@@ -117,6 +121,15 @@ pub async fn run_agent_loop(
                     })
                     .await;
             }
+            TuiCommand::SetProviderWithKey { provider, key } => {
+                client = make_client(&key);
+                let _ = event_tx
+                    .send(AgentEvent::ProviderChanged {
+                        provider_id: provider.clone(),
+                        provider_name: provider,
+                    })
+                    .await;
+            }
             TuiCommand::Clear => {
                 context.clear();
             }
@@ -146,28 +159,33 @@ async fn process_prompt(
     messages.extend(context.messages.clone());
     messages.push(Message::user(prompt));
 
+    // FIX: build tool definitions once — all tools ignore the prompt arg,
+    // so rebuilding them on every loop iteration is pure waste.
+    let static_tool_defs = {
+        let mut defs = Vec::new();
+        defs.push(tools::ReadFile.definition(prompt.to_string()).await);
+        defs.push(tools::WriteFile.definition(prompt.to_string()).await);
+        defs.push(tools::Edit.definition(prompt.to_string()).await);
+        defs.push(
+            tools::RunCommand::new(Some(event_tx.clone()))
+                .definition(prompt.to_string())
+                .await,
+        );
+        defs.push(tools::ListFiles.definition(prompt.to_string()).await);
+        defs.push(tools::SearchFiles.definition(prompt.to_string()).await);
+        defs.push(tools::Grep.definition(prompt.to_string()).await);
+        defs
+    };
+
     loop {
         if abort.load(Ordering::Acquire) {
             success = false;
             break;
         }
 
-        // Collect tool definitions
-        let mut tool_defs = Vec::new();
-        let tools_event_tx = event_tx.clone();
-        tool_defs.push(tools::ReadFile.definition(prompt.to_string()).await);
-        tool_defs.push(tools::WriteFile.definition(prompt.to_string()).await);
-        tool_defs.push(tools::Edit.definition(prompt.to_string()).await);
-        tool_defs.push(
-            tools::RunCommand::new(Some(tools_event_tx))
-                .definition(prompt.to_string())
-                .await,
-        );
-        tool_defs.push(tools::ListFiles.definition(prompt.to_string()).await);
-        tool_defs.push(tools::SearchFiles.definition(prompt.to_string()).await);
-
-        // Run context hooks before building the request
-        let mut hook_ctx = BeforeLlmCtx { messages, tool_defs };
+        // Run context hooks before building the request.
+        // Clone static_tool_defs so hooks can mutate their copy each iteration.
+        let mut hook_ctx = BeforeLlmCtx { messages, tool_defs: static_tool_defs.clone() };
         for hook in hooks {
             if let Err(e) = hook.on_before_llm(&mut hook_ctx) {
                 let _ = event_tx.send(AgentEvent::Error { message: e }).await;
@@ -179,7 +197,7 @@ async fn process_prompt(
             break;
         }
         messages = hook_ctx.messages;
-        tool_defs = hook_ctx.tool_defs;
+        let tool_defs = hook_ctx.tool_defs;
 
         let t_stream = Instant::now();
 
@@ -270,10 +288,8 @@ async fn process_prompt(
             }
         }
 
+        // FIX: removed dead `if !success { success = false; }` inner branch.
         if !success || abort.load(Ordering::Acquire) {
-            if !success {
-                success = false;
-            }
             break;
         }
 
@@ -309,11 +325,18 @@ async fn process_prompt(
         if tool_calls.iter().any(|tc| tool_is_sequential(&tc.function.name)) {
             // Run all tool calls sequentially
             for tc in tool_calls {
+                // FIX: hook error now skips tool execution for this call.
+                let mut hook_blocked = false;
                 for hook in hooks {
                     if let Err(e) = hook.on_before_tool(&tc) {
                         let _ = event_tx.send(AgentEvent::Error { message: e }).await;
                         success = false;
+                        hook_blocked = true;
+                        break;
                     }
+                }
+                if hook_blocked {
+                    continue;
                 }
 
                 let start = Instant::now();
@@ -326,11 +349,18 @@ async fn process_prompt(
             // Execute all tool calls in parallel
             let mut handles = Vec::new();
             for tc in tool_calls {
+                // FIX: hook error skips spawning this tool.
+                let mut hook_blocked = false;
                 for hook in hooks {
                     if let Err(e) = hook.on_before_tool(&tc) {
                         let _ = event_tx.send(AgentEvent::Error { message: e }).await;
                         success = false;
+                        hook_blocked = true;
+                        break;
                     }
+                }
+                if hook_blocked {
+                    continue;
                 }
 
                 let name = tc.function.name.clone();
@@ -358,9 +388,17 @@ async fn process_prompt(
                                 message: e.to_string(),
                             })
                             .await;
+                        // FIX: break out of result processing — a panicked spawn
+                        // means something is badly wrong; don't continue the loop.
                         success = false;
+                        break;
                     }
                 }
+            }
+
+            // Propagate the break out of the outer loop too if parallel failed.
+            if !success {
+                break;
             }
         }
 
@@ -420,6 +458,11 @@ async fn execute_tool(
             let a: tools::SearchFilesArgs =
                 serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
             tools::SearchFiles.call(a).await.map_err(|e| e.to_string())
+        }
+        "grep" => {
+            let a: tools::GrepArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::Grep.call(a).await.map_err(|e| e.to_string())
         }
         _ => Err(format!("unknown tool: {}", name)),
     }
