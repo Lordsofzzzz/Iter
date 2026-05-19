@@ -1,15 +1,23 @@
-use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::future::join_all;
+use futures::StreamExt;
 use tokio::sync::mpsc;
 
-use rig_core::agent::MultiTurnStreamItem;
 use rig_core::client::CompletionClient;
+use rig_core::completion::message::{
+    AssistantContent, Message, ReasoningContent, Text, ToolCall, ToolResult, ToolResultContent,
+    UserContent,
+};
+use rig_core::completion::request::CompletionRequest;
+use rig_core::completion::{CompletionModel, GetTokenUsage};
+use rig_core::one_or_many::OneOrMany;
 use rig_core::providers::openrouter;
-use rig_core::streaming::{StreamedAssistantContent, StreamedUserContent, StreamingChat};
+use rig_core::streaming::StreamedAssistantContent;
+use rig_core::tool::Tool;
 
 use crate::agent_event::{AgentEvent, TuiCommand};
 use crate::context::Context;
@@ -21,8 +29,6 @@ pub struct AgentConfig {
     pub system_prompt: String,
 }
 
-/// Build an OpenRouter client. Always uses OpenRouter as the transport;
-/// the model string encodes the provider (e.g. "anthropic/claude-3-5-sonnet").
 fn make_client(api_key: &str) -> openrouter::Client {
     openrouter::Client::new(api_key)
         .expect("failed to create OpenRouter client")
@@ -52,8 +58,6 @@ pub async fn run_agent_loop(
                 let mut deferred_clear = false;
 
                 let success = {
-                    // Pin the future so we can poll it alongside cmd_rx,
-                    // allowing TuiCommand::Abort to be received mid-turn.
                     let mut turn = std::pin::pin!(process_prompt(
                         &client,
                         &current_model,
@@ -95,14 +99,11 @@ pub async fn run_agent_loop(
                     })
                     .await;
             }
-            TuiCommand::Abort => {
-                // No-op between turns — nothing running to abort.
-            }
+            TuiCommand::Abort => {}
             TuiCommand::SetModel(model) => {
                 current_model = model;
             }
             TuiCommand::SetProvider(provider) => {
-                // Look up a provider-specific API key, fall back to the original.
                 let env_key = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
                 let key = std::env::var(&env_key).unwrap_or_else(|_| config.api_key.clone());
                 client = make_client(&key);
@@ -129,121 +130,56 @@ async fn process_prompt(
     system_prompt: &str,
     abort: &AtomicBool,
 ) -> bool {
-    use futures::StreamExt;
-
     let t_build = Instant::now();
-    let agent = client
-        .agent(model)
-        .preamble(system_prompt)
-        .max_tokens(8192)
-        .temperature(0.7)
-        .default_max_turns(20)
-        .tool(tools::ReadFile)
-        .tool(tools::WriteFile)
-        .tool(tools::Edit)
-        .tool(tools::RunCommand::new(Some(event_tx.clone())))
-        .tool(tools::ListFiles)
-        .tool(tools::SearchFiles)
-        .build();
+    let completion_model = client.completion_model(model.to_string());
     crate::trace!("agent built in {}ms", t_build.elapsed().as_millis());
 
-    let history = &context.messages;
-    let t_stream = Instant::now();
-    let mut stream = agent.stream_chat(prompt, history).await;
-    crate::trace!("stream_chat returned in {}ms", t_stream.elapsed().as_millis());
-
-    let mut pending_tools: HashMap<String, (String, Instant)> = HashMap::new();
     let mut success = true;
 
+    // Build initial message history: system + prior history + user prompt
+    let mut messages: Vec<Message> = Vec::new();
+    messages.push(Message::system(system_prompt.to_string()));
+    messages.extend(context.messages.clone());
+    messages.push(Message::user(prompt));
+
     loop {
-        // Check abort before waiting for next item.
         if abort.load(Ordering::Acquire) {
             success = false;
             break;
         }
 
-        let Some(item) = stream.next().await else { break };
+        // Collect tool definitions
+        let mut tool_defs = Vec::new();
+        let tools_event_tx = event_tx.clone();
+        tool_defs.push(tools::ReadFile.definition(prompt.to_string()).await);
+        tool_defs.push(tools::WriteFile.definition(prompt.to_string()).await);
+        tool_defs.push(tools::Edit.definition(prompt.to_string()).await);
+        tool_defs.push(
+            tools::RunCommand::new(Some(tools_event_tx))
+                .definition(prompt.to_string())
+                .await,
+        );
+        tool_defs.push(tools::ListFiles.definition(prompt.to_string()).await);
+        tool_defs.push(tools::SearchFiles.definition(prompt.to_string()).await);
 
-        // Check again after the await — abort may have been set while we waited.
-        if abort.load(Ordering::Acquire) {
-            success = false;
-            break;
-        }
+        let t_stream = Instant::now();
 
-        match item {
-            Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Reasoning(text),
-            )) => {
-                let _ = event_tx
-                    .send(AgentEvent::ThinkingDelta(reasoning_text(&text.content)))
-                    .await;
-            }
-            Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::ReasoningDelta { reasoning, .. },
-            )) => {
-                let _ = event_tx.send(AgentEvent::ThinkingDelta(reasoning)).await;
-            }
-            Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Text(text),
-            )) => {
-                let _ = event_tx.send(AgentEvent::TextDelta(text.text)).await;
-            }
-            Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::ToolCall {
-                    tool_call,
-                    internal_call_id,
-                },
-            )) => {
-                pending_tools.insert(
-                    internal_call_id,
-                    (tool_call.function.name.clone(), Instant::now()),
-                );
-                let _ = event_tx
-                    .send(AgentEvent::ToolCall {
-                        name: tool_call.function.name,
-                        input: tool_call.function.arguments.to_string(),
-                    })
-                    .await;
-            }
-            Ok(MultiTurnStreamItem::StreamUserItem(
-                StreamedUserContent::ToolResult {
-                    tool_result,
-                    internal_call_id,
-                },
-            )) => {
-                let (name, elapsed_ms) = pending_tools
-                    .remove(&internal_call_id)
-                    .map(|(n, t)| (n, t.elapsed().as_millis() as u64))
-                    .unwrap_or_else(|| (String::new(), 0));
-                let output = tool_result_text(&tool_result);
-                let _ = event_tx
-                    .send(AgentEvent::ToolResult {
-                        name,
-                        output,
-                        elapsed_ms,
-                    })
-                    .await;
-            }
-            Ok(MultiTurnStreamItem::FinalResponse(fin)) => {
-                if let Some(msgs) = fin.history() {
-                    for msg in msgs {
-                        context.add_message(msg.clone());
-                    }
-                }
-                let usage = fin.usage();
-                let pct = (usage.total_tokens as f32 / context.context_window as f32) * 100.0;
-                context.compact_if_needed(pct);
-                let _ = event_tx
-                    .send(AgentEvent::TokenUsage {
-                        input: usage.input_tokens as u32,
-                        output: usage.output_tokens as u32,
-                        total: usage.total_tokens as u32,
-                        cache_read: usage.cached_input_tokens as u32,
-                        cache_write: usage.cache_creation_input_tokens as u32,
-                        context_pct: pct,
-                    })
-                    .await;
-            }
+        let request = CompletionRequest {
+            model: None,
+            preamble: None,
+            chat_history: OneOrMany::many(messages.clone())
+                .expect("chat_history cannot be empty"),
+            documents: vec![],
+            tools: tool_defs,
+            temperature: Some(0.7),
+            max_tokens: Some(8192),
+            tool_choice: None,
+            additional_params: None,
+            output_schema: None,
+        };
+
+        let mut stream = match completion_model.stream(request).await {
+            Ok(s) => s,
             Err(e) => {
                 let _ = event_tx
                     .send(AgentEvent::Error {
@@ -253,14 +189,175 @@ async fn process_prompt(
                 success = false;
                 break;
             }
-            _ => {}
+        };
+        crate::trace!("stream_chat returned in {}ms", t_stream.elapsed().as_millis());
+
+        // Stream the assistant response
+        while let Some(item) = stream.next().await {
+            if abort.load(Ordering::Acquire) {
+                success = false;
+                break;
+            }
+
+            match item {
+                Ok(StreamedAssistantContent::Text(text)) => {
+                    let _ = event_tx.send(AgentEvent::TextDelta(text.text)).await;
+                }
+                Ok(StreamedAssistantContent::Reasoning(reasoning)) => {
+                    let text = reasoning_text(&reasoning.content);
+                    let _ = event_tx
+                        .send(AgentEvent::ThinkingDelta(text))
+                        .await;
+                }
+                Ok(StreamedAssistantContent::ReasoningDelta { reasoning, .. }) => {
+                    let _ = event_tx
+                        .send(AgentEvent::ThinkingDelta(reasoning))
+                        .await;
+                }
+                Ok(StreamedAssistantContent::ToolCall { tool_call, .. }) => {
+                    let _ = event_tx
+                        .send(AgentEvent::ToolCall {
+                            name: tool_call.function.name,
+                            input: tool_call.function.arguments.to_string(),
+                        })
+                        .await;
+                }
+                Ok(StreamedAssistantContent::Final(response)) => {
+                    if let Some(usage) = response.token_usage() {
+                        let pct =
+                            (usage.total_tokens as f32 / context.context_window as f32) * 100.0;
+                        context.compact_if_needed(pct);
+                        let _ = event_tx
+                            .send(AgentEvent::TokenUsage {
+                                input: usage.input_tokens as u32,
+                                output: usage.output_tokens as u32,
+                                total: usage.total_tokens as u32,
+                                cache_read: usage.cached_input_tokens as u32,
+                                cache_write: usage.cache_creation_input_tokens as u32,
+                                context_pct: pct,
+                            })
+                            .await;
+                    }
+                }
+                Err(e) => {
+                    let _ = event_tx
+                        .send(AgentEvent::Error {
+                            message: e.to_string(),
+                        })
+                        .await;
+                    success = false;
+                    break;
+                }
+                _ => {}
+            }
         }
+
+        if !success || abort.load(Ordering::Acquire) {
+            if !success {
+                success = false;
+            }
+            break;
+        }
+
+        // Add assistant message to history using the aggregated choice
+        messages.push(Message::Assistant {
+            id: None,
+            content: stream.choice.clone(),
+        });
+
+        // Check if there are tool calls to execute
+        let has_tool_calls = stream.choice.iter().any(|c| matches!(c, AssistantContent::ToolCall(_)));
+
+        if !has_tool_calls {
+            // No tool calls — done with this turn
+            context.messages = messages;
+            break;
+        }
+
+        // Collect tool calls from the choice
+        let tool_calls: Vec<ToolCall> = stream
+            .choice
+            .iter()
+            .filter_map(|c| {
+                if let AssistantContent::ToolCall(tc) = c {
+                    Some(tc.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Execute all tool calls in parallel
+        let mut handles = Vec::new();
+        for tc in tool_calls {
+            let tx = event_tx.clone();
+
+            handles.push(tokio::spawn(async move {
+                let start = Instant::now();
+                let result = execute_tool(&tc.function.name, &tc.function.arguments, Some(tx)).await;
+                let elapsed = start.elapsed().as_millis() as u64;
+                (tc, result, elapsed)
+            }));
+        }
+
+        let results = join_all(handles).await;
+
+        for result in results {
+            match result {
+                Ok((tool_call, Ok(output), elapsed_ms)) => {
+                    let _ = event_tx
+                        .send(AgentEvent::ToolResult {
+                            name: tool_call.function.name.clone(),
+                            output: output.clone(),
+                            elapsed_ms,
+                        })
+                        .await;
+
+                    messages.push(Message::User {
+                        content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                            id: tool_call.id.clone(),
+                            call_id: tool_call.call_id.clone(),
+                            content: OneOrMany::one(ToolResultContent::Text(Text {
+                                text: output,
+                            })),
+                        })),
+                    });
+                }
+                Ok((tool_call, Err(error), elapsed_ms)) => {
+                    let _ = event_tx
+                        .send(AgentEvent::ToolResult {
+                            name: tool_call.function.name.clone(),
+                            output: error.clone(),
+                            elapsed_ms,
+                        })
+                        .await;
+
+                    messages.push(Message::User {
+                        content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                            id: tool_call.id.clone(),
+                            call_id: tool_call.call_id.clone(),
+                            content: OneOrMany::one(ToolResultContent::Text(Text {
+                                text: error,
+                            })),
+                        })),
+                    });
+                }
+                Err(e) => {
+                    let _ = event_tx
+                        .send(AgentEvent::Error {
+                            message: e.to_string(),
+                        })
+                        .await;
+                    success = false;
+                }
+            }
+        }
+
+        // Loop back to send assistant another turn with tool results
     }
 
     success
 }
-
-use rig_core::completion::message::ReasoningContent;
 
 fn reasoning_text(content: &[ReasoningContent]) -> String {
     content
@@ -274,13 +371,45 @@ fn reasoning_text(content: &[ReasoningContent]) -> String {
         .join(" ")
 }
 
-fn tool_result_text(tr: &rig_core::message::ToolResult) -> String {
-    tr.content
-        .iter()
-        .filter_map(|c| match c {
-            rig_core::message::ToolResultContent::Text(t) => Some(t.text.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+async fn execute_tool(
+    name: &str,
+    args: &serde_json::Value,
+    event_tx: Option<mpsc::Sender<AgentEvent>>,
+) -> Result<String, String> {
+    match name {
+        "read_file" => {
+            let a: tools::ReadFileArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::ReadFile.call(a).await.map_err(|e| e.to_string())
+        }
+        "write_file" => {
+            let a: tools::WriteFileArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::WriteFile.call(a).await.map_err(|e| e.to_string())
+        }
+        "edit" => {
+            let a: tools::EditArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::Edit.call(a).await.map_err(|e| e.to_string())
+        }
+        "run_command" => {
+            let a: tools::RunCommandArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::RunCommand::new(event_tx)
+                .call(a)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "list_files" => {
+            let a: tools::ListFilesArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::ListFiles.call(a).await.map_err(|e| e.to_string())
+        }
+        "search_files" => {
+            let a: tools::SearchFilesArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::SearchFiles.call(a).await.map_err(|e| e.to_string())
+        }
+        _ => Err(format!("unknown tool: {}", name)),
+    }
 }

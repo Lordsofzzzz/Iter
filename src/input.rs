@@ -37,6 +37,23 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
 /// Maximum number of items shown in the overlay at once.
 const MAX_VISIBLE: usize = 5;
 
+/// Free models available via OpenRouter.
+/// (model_id, display_name, context_window)
+const FREE_MODELS: &[(&str, &str, &str)] = &[
+    ("deepseek/deepseek-v4-flash:free",               "DeepSeek V4 Flash",       "64k"),
+    ("deepseek/deepseek-r1:free",                     "DeepSeek R1",             "64k"),
+    ("deepseek/deepseek-r1-0528:free",                "DeepSeek R1 0528",        "64k"),
+    ("google/gemini-2.5-flash-preview:free",          "Gemini 2.5 Flash",        "1M"),
+    ("google/gemini-2.0-flash-thinking-exp:free",     "Gemini 2.0 Flash Think",  "1M"),
+    ("meta-llama/llama-4-scout:free",                 "Llama 4 Scout",           "128k"),
+    ("meta-llama/llama-4-maverick:free",               "Llama 4 Maverick",        "128k"),
+    ("meta-llama/llama-3.3-70b-instruct:free",        "Llama 3.3 70B",           "128k"),
+    ("mistralai/mistral-7b-instruct:free",            "Mistral 7B",              "32k"),
+    ("qwen/qwen3-235b-a22b:free",                     "Qwen3 235B",              "128k"),
+    ("qwen/qwen3-30b-a3b:free",                       "Qwen3 30B",               "128k"),
+    ("microsoft/phi-4-reasoning-plus:free",           "Phi-4 Reasoning+",        "32k"),
+];
+
 /// Available providers with their display names and env key names.
 const PROVIDERS: &[(&str, &str, &str)] = &[
     ("openrouter", "OpenRouter",  "OPENROUTER_API_KEY"),
@@ -74,6 +91,8 @@ enum InputMode {
     ProviderPicker(ProviderPickerState),
     /// Typing the API key for a chosen provider.
     ApiKeyEntry { provider_id: &'static str, provider_name: &'static str, buf: String },
+    /// Showing the model list picker.
+    ModelPicker(ModelPickerState),
 }
 
 // ── Private types ─────────────────────────────────────────────────────────────
@@ -100,6 +119,42 @@ impl ProviderPickerState {
 
     fn selected_provider(&self) -> (&'static str, &'static str, &'static str) {
         PROVIDERS[self.selected]
+    }
+}
+
+#[derive(Clone)]
+struct ModelPickerState {
+    selected: usize,
+    scroll:   usize,
+}
+
+impl ModelPickerState {
+    fn new() -> Self { Self { selected: 0, scroll: 0 } }
+
+    fn move_up(&mut self) {
+        if self.selected == 0 {
+            self.selected = FREE_MODELS.len() - 1;
+        } else {
+            self.selected -= 1;
+        }
+        self.sync_scroll();
+    }
+
+    fn move_down(&mut self) {
+        self.selected = (self.selected + 1) % FREE_MODELS.len();
+        self.sync_scroll();
+    }
+
+    fn sync_scroll(&mut self) {
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + MAX_VISIBLE {
+            self.scroll = self.selected - MAX_VISIBLE + 1;
+        }
+    }
+
+    fn selected_model(&self) -> (&'static str, &'static str, &'static str) {
+        FREE_MODELS[self.selected]
     }
 }
 
@@ -230,8 +285,13 @@ impl InputBox {
     fn reserve(&mut self, state: &State) -> io::Result<()> {
         let mut out = io::stderr();
         // Reserve rows for: box (3) + status (1) + largest possible overlay.
-        // Provider list = PROVIDERS.len() + 2 borders; slash = MAX_VISIBLE + 2; API key = 4.
-        let max_overlay = (PROVIDERS.len() as u16 + 2).max(MAX_VISIBLE as u16 + 2).max(4);
+        // Provider list = PROVIDERS.len() + 2; model list = min(FREE_MODELS.len(), MAX_VISIBLE) + 2;
+        // slash = MAX_VISIBLE + 2; API key = 4.
+        let model_count = (FREE_MODELS.len() as u16).min(MAX_VISIBLE as u16);
+        let max_overlay = (PROVIDERS.len() as u16 + 2)
+            .max(model_count + 2)
+            .max(MAX_VISIBLE as u16 + 2)
+            .max(4);
         let total_rows = BOX_ROWS + 1 + max_overlay;
         for _ in 0..total_rows {
             out.queue(style::Print("\n"))?;
@@ -338,6 +398,38 @@ impl InputBox {
                         continue;
                     }
 
+                    // ── Model picker mode ──────────────────────────────────
+                    if let InputMode::ModelPicker(_) = &self.mode {
+                        match (code, modifiers) {
+                            (KeyCode::Esc, _) => {
+                                self.mode = InputMode::Normal;
+                            }
+                            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                                if let InputMode::ModelPicker(ref mut m) = self.mode {
+                                    m.move_up();
+                                }
+                            }
+                            (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                                if let InputMode::ModelPicker(ref mut m) = self.mode {
+                                    m.move_down();
+                                }
+                            }
+                            (KeyCode::Enter, _) | (KeyCode::Tab, _) => {
+                                if let InputMode::ModelPicker(ref m) = self.mode {
+                                    let (id, _name, _ctx) = m.selected_model();
+                                    return Ok(InputResult::Submit(format!("/model {}", id)));
+                                }
+                            }
+                            (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                            | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                return Ok(InputResult::Quit);
+                            }
+                            _ => {}
+                        }
+                        self.draw(Some(state))?;
+                        continue;
+                    }
+
                     match (code, modifiers) {
                         // ── Slash-mode navigation ──────────────────────────
                         (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
@@ -364,6 +456,12 @@ impl InputBox {
                                     self.cursor = 0;
                                     self.slash = None;
                                     self.mode = InputMode::ProviderPicker(ProviderPickerState::new());
+                                } else if cmd == "/model" {
+                                    // Launch model picker instead of normal completion.
+                                    self.buf.clear();
+                                    self.cursor = 0;
+                                    self.slash = None;
+                                    self.mode = InputMode::ModelPicker(ModelPickerState::new());
                                 } else {
                                     // Replace buffer with completed command + space.
                                     self.buf = format!("{cmd} ");
@@ -536,6 +634,9 @@ impl InputBox {
         } else if let InputMode::ApiKeyEntry { provider_name, ref buf, .. } = self.mode {
             self.draw_apikey_overlay(&mut out, provider_name, buf, cols)?;
             4u16 // top border + prompt row + input row + bottom border
+        } else if let InputMode::ModelPicker(ref picker) = self.mode {
+            self.draw_model_overlay(&mut out, picker, cols)?;
+            (FREE_MODELS.len() as u16).min(MAX_VISIBLE as u16) + 2
         } else if let Some(slash) = self.slash.clone() {
             let count = slash.matches.len().min(MAX_VISIBLE);
             if count > 0 {
@@ -759,6 +860,66 @@ impl InputBox {
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(style::PrintStyledContent(
             border_line('╰', '╯', " ↵ confirm  esc back ", cols).with(Color::DarkMagenta),
+        ))?;
+
+        Ok(())
+    }
+
+    /// Draw the model picker overlay.
+    fn draw_model_overlay(
+        &self,
+        out:    &mut io::Stderr,
+        picker: &ModelPickerState,
+        cols:   usize,
+    ) -> io::Result<()> {
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╭', '╮', " select model ", cols).with(Color::Cyan),
+        ))?;
+
+        let visible_count = FREE_MODELS.len().min(MAX_VISIBLE);
+        let visible_slice = &FREE_MODELS[picker.scroll..picker.scroll + visible_count];
+
+        let model_col_width = visible_slice
+            .iter()
+            .map(|(_, name, _)| UnicodeWidthStr::width(*name))
+            .max()
+            .unwrap_or(16);
+
+        for (i, (_id, name, ctx)) in visible_slice.iter().enumerate() {
+            let abs_idx     = picker.scroll + i;
+            let is_selected = abs_idx == picker.selected;
+
+            out.queue(cursor::MoveDown(1))?;
+            out.queue(cursor::MoveToColumn(0))?;
+
+            let inner  = cols.saturating_sub(4);
+            let name_w = UnicodeWidthStr::width(*name);
+            let ctx_w  = UnicodeWidthStr::width(*ctx);
+            let gap    = model_col_width.saturating_sub(name_w) + 2;
+            let pad    = inner.saturating_sub(name_w + gap + ctx_w);
+
+            out.queue(style::PrintStyledContent("│ ".with(Color::Cyan)))?;
+            if is_selected {
+                out.queue(style::PrintStyledContent(name.with(Color::White).bold()))?;
+                out.queue(style::Print(" ".repeat(gap)))?;
+                out.queue(style::PrintStyledContent(ctx.with(Color::DarkGrey)))?;
+                out.queue(style::Print(" ".repeat(pad)))?;
+                out.queue(style::PrintStyledContent(" │".with(Color::Cyan)))?;
+            } else {
+                out.queue(style::PrintStyledContent(name.with(Color::DarkCyan)))?;
+                out.queue(style::Print(" ".repeat(gap)))?;
+                out.queue(style::PrintStyledContent(ctx.with(Color::DarkGrey)))?;
+                out.queue(style::Print(" ".repeat(pad)))?;
+                out.queue(style::PrintStyledContent(" │".with(Color::Cyan)))?;
+            }
+        }
+
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╰', '╯', " ↑↓ select  ↵ confirm  esc cancel ", cols).with(Color::DarkCyan),
         ))?;
 
         Ok(())
