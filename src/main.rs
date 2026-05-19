@@ -1,147 +1,143 @@
-//! Iter inline interactive coding agent.
-//!
-//! Output streams to stdout normally and scrolls in terminal history. The input
-//! row renders inline with crossterm and does not use an alternate screen.
-
 mod agent;
+mod agent_event;
 mod cli;
-mod highlight;
+mod context;
 mod input;
-mod rpc;
 mod state;
+mod tools;
 
 use std::io::{self, Write};
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use clap::Parser;
-use crossterm::style::{self, Attribute, Color, Stylize};
+use crossterm::style::{self, Color, Stylize};
 use crossterm::terminal;
+use tokio::sync::mpsc;
 
-use cli::{Cli, Command};
-use input::{InputBox, InputResult};
-use rpc::{AgentMessage, CommandPayload, PushEvent, UiEvent};
+use agent_event::{AgentEvent, TuiCommand};
+use cli::Cli;
+use input::{format_tokens, InputBox, InputResult};
 use state::State;
+
+#[macro_export]
+macro_rules! trace {
+    ($($arg:tt)*) => {{
+        if std::env::var("ITER_PROFILE").is_ok() {
+            let _ = writeln!(std::io::stderr(), "[profile] {}", format_args!($($arg)*));
+        }
+    }};
+}
+
+use termimad::MadSkin;
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
 
     if let Some(workdir) = &cli.global.workdir {
-        std::env::set_current_dir(workdir)?;
+        std::env::set_current_dir(workdir)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     }
+
+    let model = cli.global.model.unwrap_or_else(|| "deepseek/deepseek-v4-flash:free".into());
+    let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+    let api_key = if api_key.is_empty() {
+        eprint!("OPENROUTER_API_KEY not set. Enter key: ");
+        let mut key = String::new();
+        io::stdin().read_line(&mut key).ok();
+        key.trim().to_string()
+    } else {
+        api_key
+    };
 
     let mut state = State::new();
+    state.model_name = model.clone();
+    state.provider_name = "openrouter".into();
     state.show_thinking = cli.global.show_thinking;
 
-    // Resolve provider + model + API key BEFORE spawning agent so we can inject env vars.
-    let (resolved_provider, resolved_model, resolved_api_key) =
-        match (&cli.global.provider, &cli.global.model) {
-            (Some(p), Some(m)) => {
-                let key = prompt_api_key_if_needed(p);
-                (Some(p.clone()), Some(m.clone()), key)
-            }
-            (Some(p), None) => {
-                let key = prompt_api_key_if_needed(p);
-                (Some(p.clone()), None, key)
-            }
-            (None, Some(m)) => {
-                let provider = infer_provider_from_model(m);
-                let key = provider.as_deref().and_then(|p| prompt_api_key_if_needed(p));
-                (provider, Some(m.clone()), key)
-            }
-            (None, None) => pick_provider_model_interactive()?,
-        };
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
 
-    let (tx, rx) = mpsc::channel::<UiEvent>();
-    let config = agent::AgentConfig {
-        entry_path:  cli.global.agent_entry.clone(),
-        log_dir:     cli.global.log_dir.clone(),
-        api_key:     resolved_api_key,
-        provider_id: resolved_provider.clone(),
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
+    let (cmd_tx, cmd_rx) = mpsc::channel::<TuiCommand>(16);
+
+    let agent_config = agent::AgentConfig {
+        model: model.clone(),
+        api_key,
+        system_prompt: format!(
+            "You are a helpful coding assistant. Current directory: {}. OS: {}.",
+            cwd,
+            std::env::consts::OS,
+        ),
     };
-    let mut agent_stdin = agent::spawn_agent(tx, &config);
 
-    if agent_stdin.is_none() {
-        return Err(io::Error::new(io::ErrorKind::Other, "failed to spawn agent"));
-    }
+    rt.spawn(async move {
+        agent::run_agent_loop(agent_config, event_tx, cmd_rx).await;
+    });
 
-    agent::send_cmd(
-        &mut agent_stdin,
-        CommandPayload::GetState { id: "startup".into() },
-    );
-    drain_startup(&rx, &mut state, &mut agent_stdin);
+    let initial_prompt = match &cli.command {
+        cli::Command::Ask { prompt } if !prompt.is_empty() => Some(prompt.join(" ")),
+        _ => None,
+    };
 
-    if let Some(provider) = &resolved_provider {
-        agent::send_cmd(
-            &mut agent_stdin,
-            CommandPayload::SetProvider {
-                id: "set-provider".into(),
-                provider: provider.clone(),
-            },
-        );
-        drain_startup(&rx, &mut state, &mut agent_stdin);
-    }
-
-    if let Some(model) = &resolved_model {
-        agent::send_cmd(
-            &mut agent_stdin,
-            CommandPayload::SetModel {
-                id: "set-model".into(),
-                model: model.clone(),
-            },
-        );
-        drain_startup(&rx, &mut state, &mut agent_stdin);
-    }
-
-    match cli.command {
-        Command::Ask { prompt } if !prompt.is_empty() => {
-            let prompt = prompt.join(" ");
-            print_agent_header(&state);
-            let prompt_id = "prompt-1";
-            send_prompt(&mut agent_stdin, prompt_id, prompt);
-            stream_response(&rx, &mut state, prompt_id)?;
-        }
-        Command::Ask { .. } => {
-            interactive_loop(&rx, &mut state, &mut agent_stdin)?;
-        }
-    }
-
-    Ok(())
+    interactive_loop(&mut state, &rt, &mut event_rx, cmd_tx, initial_prompt)
 }
 
 fn interactive_loop(
-    rx: &Receiver<UiEvent>,
     state: &mut State,
-    agent_stdin: &mut Option<std::process::ChildStdin>,
+    rt: &tokio::runtime::Runtime,
+    event_rx: &mut mpsc::Receiver<AgentEvent>,
+    cmd_tx: mpsc::Sender<TuiCommand>,
+    initial_prompt: Option<String>,
 ) -> io::Result<()> {
-    print_welcome(state);
+    if initial_prompt.is_none() {
+        println!(
+            "{}  {}  {}",
+            "iter".with(Color::DarkGreen).bold(),
+            "v0.2.0".with(Color::DarkGrey),
+            state.model_name.as_str().with(Color::DarkGrey),
+        );
+        println!(
+            "{}",
+            "─────────────────────────────────────────".with(Color::DarkGrey)
+        );
+        println!(
+            "  {}",
+            "↵ submit   ^k abort   ^u clear   ^c quit".with(Color::DarkGrey),
+        );
+        println!();
+    }
+
+    if let Some(prompt) = initial_prompt {
+        let _ = io::stdout().flush();
+        rt.block_on(handle_turn(event_rx, &cmd_tx, prompt, state));
+        println!();
+        print_status_bar(state);
+        return Ok(());
+    }
 
     let mut input = InputBox::new();
-    let mut turn_id = 1usize;
 
     loop {
-        let hint = "describe your task...  (ctrl-k abort, ctrl-c quit)";
-        match input.read(hint, state)? {
+        match input.read("describe your task...", state)? {
             InputResult::Quit => {
                 eprintln!();
                 break;
             }
             InputResult::Abort => {
-                agent::send_cmd(
-                    agent_stdin,
-                    CommandPayload::Abort {
-                        id: format!("abort-{turn_id}"),
-                    },
-                );
-                print_status("aborted", Color::DarkYellow);
+                let _ = cmd_tx.try_send(TuiCommand::Abort);
             }
             InputResult::Submit(prompt) => {
                 let _ = io::stdout().flush();
-                let prompt_id = format!("prompt-{turn_id}");
-                send_prompt(agent_stdin, &prompt_id, prompt);
-                stream_response(rx, state, &prompt_id)?;
-                refresh_stats(rx, state, agent_stdin, turn_id);
-                turn_id += 1;
+                if !handle_slash_command(&prompt, &cmd_tx, state) {
+                    rt.block_on(handle_turn(event_rx, &cmd_tx, prompt, state));
+                    print_status_bar(state);
+                }
             }
         }
     }
@@ -149,256 +145,305 @@ fn interactive_loop(
     Ok(())
 }
 
-fn send_prompt(
-    agent_stdin: &mut Option<std::process::ChildStdin>,
-    id: &str,
+async fn handle_turn(
+    event_rx: &mut mpsc::Receiver<AgentEvent>,
+    cmd_tx: &mpsc::Sender<TuiCommand>,
     prompt: String,
-) {
-    agent::send_cmd(
-        agent_stdin,
-        CommandPayload::Prompt {
-            id: id.to_string(),
-            content: prompt,
-        },
-    );
-}
-
-/// What `handle_push_event` wants the event loop to do next.
-enum LoopAction {
-    /// Keep receiving events.
-    Continue,
-    /// Agent turn finished — render the buffered response and return.
-    Done,
-}
-
-/// Handle a single push event, updating `state` and `response_buf` as needed.
-///
-/// All rendering decisions live here; `stream_response` is just a loop.
-fn handle_push_event(
-    event: PushEvent,
     state: &mut State,
-    response_buf: &mut String,
-    stdout: &mut impl Write,
-    expected_id: &str,
-) -> io::Result<LoopAction> {
-    match event {
-        PushEvent::TextDelta { delta } => {
-            response_buf.push_str(&delta);
+) {
+    let t0 = Instant::now();
+    let _ = cmd_tx.send(TuiCommand::Prompt(prompt)).await;
+    let mut first_event = true;
+    let mut first_token_time: Option<u64> = None;
+
+    let mut current_text_block = String::new();
+    let mut last_rendered_lines: Vec<String> = Vec::new();
+    let mut last_char = '\n';
+    let skin = MadSkin::default();
+
+    while let Some(event) = event_rx.recv().await {
+        let elapsed = t0.elapsed().as_millis() as u64;
+        if first_event {
+            trace!("first event received at {}ms", elapsed);
+            first_event = false;
         }
-        PushEvent::ThinkingDelta { delta } => {
-            if state.show_thinking {
-                crossterm::queue!(
-                    stdout,
-                    style::PrintStyledContent(
-                        delta.with(Color::DarkGrey).attribute(Attribute::Italic)
-                    )
-                )?;
-                stdout.flush()?;
+
+        match event {
+            AgentEvent::TextDelta(delta) => {
+                if first_token_time.is_none() {
+                    first_token_time = Some(elapsed);
+                    trace!("first text delta at {}ms", elapsed);
+                }
+                
+                if current_text_block.is_empty() && last_char != '\n' {
+                    println!();
+                    last_char = '\n';
+                }
+
+                current_text_block.push_str(&delta);
+
+                let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
+                let t_mad = Instant::now();
+                let fmt_text = skin.text(&current_text_block, Some(term_width));
+                let rendered = format!("{}", fmt_text);
+                let mad_us = t_mad.elapsed().as_micros();
+
+                let new_lines: Vec<String> = if rendered.is_empty() {
+                    Vec::new()
+                } else {
+                    rendered
+                        .strip_suffix('\n')
+                        .unwrap_or(&rendered)
+                        .split('\n')
+                        .map(|s| s.to_string())
+                        .collect()
+                };
+
+                let mut common_len = 0;
+                for (old, new) in last_rendered_lines.iter().zip(new_lines.iter()) {
+                    if old == new {
+                        common_len += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                let go_up = last_rendered_lines.len().saturating_sub(common_len);
+                if go_up > 0 {
+                    print!("\x1b[{}A", go_up);
+                }
+                
+                if go_up > 0 || common_len < new_lines.len() {
+                    print!("\r\x1b[0J");
+                    for line in new_lines.iter().skip(common_len) {
+                        println!("{}", line);
+                    }
+                    io::stdout().flush().ok();
+                }
+                let line_count = new_lines.len();
+                last_rendered_lines = new_lines;
+                trace!("render: {}µs ({} chars, {} lines)", mad_us, current_text_block.len(), line_count);
             }
-        }
-        PushEvent::ToolCall { name, input } => {
-            state.pending_tool_call = Some((name.clone(), input.clone()));
-            state.tool_start_time = Some(std::time::Instant::now());
-            state.tool_calls += 1;
-            print_tool_call(&name, &input);
-        }
-        PushEvent::ToolResult { name, output } => {
-            let elapsed_ms = state.tool_start_time
-                .take()
-                .map(|t| t.elapsed().as_millis() as u64)
-                .unwrap_or(0);
-            state.pending_tool_call = None;
-            print_tool_result(&name, &output, elapsed_ms);
-        }
-        PushEvent::ToolUpdate { .. } => {}
-        PushEvent::Cooldown { wait_ms, retries_left } => {
-            let secs = (wait_ms + 999) / 1000;
-            print_status(
-                &format!("rate limited: waiting {secs}s ({retries_left} retries left)"),
-                Color::DarkYellow,
-            );
-        }
-        PushEvent::RetryResult { success, attempt } => {
-            if !success {
-                print_status(&format!("retry attempt {attempt} failed"), Color::DarkRed);
+            AgentEvent::ToolCall { name, input } => {
+                current_text_block.clear();
+                last_rendered_lines.clear();
+                last_char = '\n';
+                
+                if first_token_time.is_none() {
+                    first_token_time = Some(elapsed);
+                    trace!("first tool call at {}ms", elapsed);
+                }
+                state.pending_tool_call = Some((name.clone(), input.clone()));
+                state.tool_start_time = Some(Instant::now());
+                state.tool_calls += 1;
+                print_tool_call(&name, &input);
             }
-        }
-        PushEvent::AutoRetryStart { attempt, max_attempts, delay_ms, .. } => {
-            print_status(
-                &format!("retry {attempt}/{max_attempts} in {delay_ms}ms"),
-                Color::DarkYellow,
-            );
-        }
-        PushEvent::AutoRetryEnd { success, attempt, final_error } => {
-            if !success {
-                print_status(
-                    &format!(
-                        "failed after {attempt} attempts: {}",
-                        final_error.unwrap_or_else(|| "unknown".into())
-                    ),
-                    Color::DarkRed,
-                );
+            AgentEvent::ToolResult { name, output, elapsed_ms } => {
+                last_char = '\n';
+                state.pending_tool_call = None;
+                print_tool_result(&name, &output, elapsed_ms);
             }
-        }
-        PushEvent::Error { id, message } => {
-            if !event_id_matches(&id, expected_id) {
-                return Ok(LoopAction::Continue);
+            AgentEvent::TokenUsage { input, output, total, cache_read, cache_write, context_pct } => {
+                state.tokens_input = input;
+                state.tokens_output = output;
+                state.tokens_total = total;
+                state.tokens_cache_read = cache_read;
+                state.tokens_cache_write = cache_write;
+                state.context_pct = context_pct;
             }
-            print_status(&format!("error: {message}"), Color::DarkRed);
-        }
-        PushEvent::ModelList { models } => {
-            state.models = models.into_iter().map(|m| (m.id, m.name)).collect();
-        }
-        PushEvent::ProviderChanged { provider_id, provider_name } => {
-            state.provider_name = if provider_name.is_empty() {
-                provider_id
-            } else {
-                provider_name
-            };
-        }
-        PushEvent::AgentEnd { id, success, error } => {
-            if !event_id_matches(&id, expected_id) {
-                return Ok(LoopAction::Continue);
+            AgentEvent::TurnEnd => {
+                state.turns += 1;
             }
-            if !response_buf.is_empty() {
-                print_response(response_buf);
-            }
-            if !success {
-                let message = error.unwrap_or_else(|| "agent turn failed".into());
+            AgentEvent::Error { message } => {
                 print_status(&message, Color::DarkRed);
             }
-            println!();
-            return Ok(LoopAction::Done);
-        }
-        PushEvent::AgentStart => {}
-        PushEvent::TurnStart { id } => {
-            if !event_id_matches(&id, expected_id) {
-                return Ok(LoopAction::Continue);
+            AgentEvent::AgentEnd { .. } => {
+                println!();
+                trace!("turn complete: {}ms total, first_token={}ms",
+                    t0.elapsed().as_millis(),
+                    first_token_time.unwrap_or(0));
+                break;
             }
-            state.thinking_token_count = 0;
-        }
-        PushEvent::TurnEnd { id } => {
-            if !event_id_matches(&id, expected_id) {
-                return Ok(LoopAction::Continue);
-            }
-            state.thinking_token_count = 0;
-            state.thinking_buf.clear();
-        }
-    }
-    Ok(LoopAction::Continue)
-}
-
-fn event_id_matches(id: &Option<String>, expected_id: &str) -> bool {
-    id.as_deref().map_or(true, |id| id == expected_id)
-}
-
-fn stream_response(
-    rx: &Receiver<UiEvent>,
-    state: &mut State,
-    expected_id: &str,
-) -> io::Result<()> {
-    let mut stdout = io::stdout();
-    let mut response_buf = String::new();
-
-    loop {
-        match rx.recv() {
-            Ok(UiEvent::Agent(AgentMessage::Push(event))) => {
-                match handle_push_event(event, state, &mut response_buf, &mut stdout, expected_id)? {
-                    LoopAction::Continue => {}
-                    LoopAction::Done => return Ok(()),
+            AgentEvent::ThinkingDelta(delta) => {
+                if state.show_thinking && !delta.is_empty() {
+                    last_char = delta.chars().last().unwrap_or(last_char);
+                    crossterm::queue!(
+                        io::stdout(),
+                        style::PrintStyledContent(
+                            delta.with(Color::DarkGrey).attribute(crossterm::style::Attribute::Italic)
+                        )
+                    ).ok();
+                    io::stdout().flush().ok();
                 }
             }
-            Ok(UiEvent::Agent(AgentMessage::Pull(response))) => {
-                let failed_active_prompt = response.command == "prompt"
-                    && response.id.as_deref() == Some(expected_id)
-                    && !response.success;
-                let error = response.error.clone();
-                agent::apply_pull_response(state, response);
-                if failed_active_prompt {
-                    let message = error.unwrap_or_else(|| "prompt rejected".into());
-                    print_status(&message, Color::DarkRed);
-                    return Ok(());
-                }
-            }
-            Ok(UiEvent::Agent(AgentMessage::Unknown { raw })) => {
-                eprintln!("\n[rpc] {raw}");
-            }
-            Ok(UiEvent::SpawnError(message)) => {
-                return Err(io::Error::new(io::ErrorKind::Other, message));
-            }
-            Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "agent disconnected",
-                ));
-            }
+            AgentEvent::TurnStart => {}
+            _ => {}
         }
     }
 }
 
-fn drain_startup(
-    rx: &Receiver<UiEvent>,
+fn handle_slash_command(
+    prompt: &str,
+    cmd_tx: &mpsc::Sender<TuiCommand>,
     state: &mut State,
-    agent_stdin: &mut Option<std::process::ChildStdin>,
-) {
-    let deadline = Instant::now() + Duration::from_millis(500);
-    while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(25)) {
-            Ok(UiEvent::Agent(msg)) => agent::handle_agent_msg_state(state, agent_stdin, msg),
-            Ok(UiEvent::SpawnError(e)) => eprintln!("spawn: {e}"),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+) -> bool {
+    let trimmed = prompt.trim();
+    if !trimmed.starts_with('/') {
+        return false;
+    }
+
+    let mut parts = trimmed.splitn(2, ' ');
+    let cmd = parts.next().unwrap_or("");
+    let arg = parts.next().unwrap_or("").trim();
+
+    match cmd {
+        "/clear" => {
+            let _ = cmd_tx.try_send(TuiCommand::Clear);
+            println!("  {}", "conversation history cleared".with(Color::DarkGrey));
+            true
         }
+        "/abort" => {
+            let _ = cmd_tx.try_send(TuiCommand::Abort);
+            true
+        }
+        "/model" => {
+            if arg.is_empty() {
+                println!("  {}", "usage: /model <model-id>".with(Color::DarkYellow));
+            } else {
+                state.model_name = arg.to_string();
+                let _ = cmd_tx.try_send(TuiCommand::SetModel(arg.to_string()));
+                println!("  {} {}", "model set to".with(Color::DarkGrey), arg.with(Color::White));
+            }
+            true
+        }
+        "/provider" => {
+            if arg.is_empty() {
+                println!("  {}", "usage: /provider <provider-id>".with(Color::DarkYellow));
+            } else {
+                state.provider_name = arg.to_string();
+                let _ = cmd_tx.try_send(TuiCommand::SetProvider(arg.to_string()));
+                println!("  {} {}", "provider set to".with(Color::DarkGrey), arg.with(Color::White));
+            }
+            true
+        }
+        "/help" => {
+            println!("  {}", "commands:".with(Color::DarkGrey));
+            println!("  {}  {}", "/model <id>   ".with(Color::White), "switch model".with(Color::DarkGrey));
+            println!("  {}  {}", "/provider <id>".with(Color::White), "switch provider".with(Color::DarkGrey));
+            println!("  {}  {}", "/clear        ".with(Color::White), "clear conversation history".with(Color::DarkGrey));
+            println!("  {}  {}", "/abort        ".with(Color::White), "abort current request".with(Color::DarkGrey));
+            println!("  {}  {}", "/help         ".with(Color::White), "show this help".with(Color::DarkGrey));
+            true
+        }
+        _ => false,
     }
 }
 
-fn refresh_stats(
-    rx: &Receiver<UiEvent>,
-    state: &mut State,
-    agent_stdin: &mut Option<std::process::ChildStdin>,
-    turn_id: usize,
-) {
-    agent::send_cmd(
-        agent_stdin,
-        CommandPayload::GetSessionStats {
-            id: format!("stats-{turn_id}"),
-        },
+fn print_tool_call(name: &str, input: &str) {
+    let label = tool_human_label(name, input);
+    let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
+    let tag = format!(" {} ", name);
+    let inner = cols.saturating_sub(2);
+    let label_len = label.chars().count();
+    let tag_len = tag.chars().count();
+    let gap = inner.saturating_sub(1 + label_len + tag_len);
+
+    println!();
+    println!(
+        "{}{}{}{}{}",
+        "┌".with(Color::DarkGrey),
+        format!(" {}", label).with(Color::White).bold(),
+        " ".repeat(gap).with(Color::DarkGrey),
+        tag.with(Color::DarkCyan),
+        "┐".with(Color::DarkGrey),
     );
-    drain_startup(rx, state, agent_stdin);
 }
 
-fn print_welcome(state: &State) {
-    let model = if state.model_name.is_empty() {
-        "unknown"
+fn print_tool_result(_name: &str, output: &str, elapsed_ms: u64) {
+    let elapsed = if elapsed_ms >= 1000 {
+        format!("{:.1}s", elapsed_ms as f64 / 1000.0)
     } else {
-        &state.model_name
+        format!("{}ms", elapsed_ms)
     };
 
-    let version = env!("CARGO_PKG_VERSION");
+    let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
+    let inner = cols.saturating_sub(2);
+    let all_lines: Vec<&str> = output.lines().collect();
+    let total = all_lines.len();
 
+    let bar_l = "│".with(Color::DarkGrey);
+    let bar_r = "│".with(Color::DarkGrey);
+
+    if total > 2000 {
+        let msg = format!("[Truncated: showing {} of {} lines]", 12, total);
+        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
+        println!("{} {}{}{}", bar_l, msg.with(Color::DarkYellow), pad, bar_r);
+    }
+
+    if total > 12 {
+        let msg = format!("... ({} earlier lines)", total - 12);
+        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
+        println!("{} {}{}{}", bar_l, msg.with(Color::DarkGrey), pad, bar_r);
+    }
+
+    let tail = &all_lines[total.saturating_sub(12)..];
+    for line in tail {
+        let truncated = truncate_chars(line, inner.saturating_sub(2));
+        let pad = " ".repeat(inner.saturating_sub(1 + truncated.chars().count()));
+        println!("{} {}{}{}", bar_l, truncated.with(Color::Grey), pad, bar_r);
+    }
+
+    let took = format!(" Took {} ", elapsed);
+    let border_fill = inner.saturating_sub(took.chars().count());
     println!(
-        "{}  {}  {}",
-        "iter".with(Color::DarkGreen).bold(),
-        format!("v{version}").with(Color::DarkGrey),
-        model.with(Color::DarkGrey),
-    );
-    println!(
-        "{}",
-        "─────────────────────────────────────────".with(Color::DarkGrey)
-    );
-    println!(
-        "  {}",
-        "↵ submit   ^k abort   ^u clear   ^c quit".with(Color::DarkGrey),
+        "{}{}{}{}",
+        "└".with(Color::DarkGrey),
+        took.with(Color::DarkGrey),
+        "─".repeat(border_fill).with(Color::DarkGrey),
+        "┘".with(Color::DarkGrey),
     );
     println!();
 }
 
-fn print_agent_header(state: &State) {
-    println!(
-        "\n{} {}",
-        ">".with(Color::DarkGreen),
-        state.model_name.as_str().with(Color::DarkGrey),
+fn print_status_bar(state: &State) {
+    let ctx_color = if state.context_pct > 80.0 {
+        Color::DarkRed
+    } else if state.context_pct > 50.0 {
+        Color::DarkYellow
+    } else {
+        Color::DarkGreen
+    };
+    let bar_width = 10usize;
+    let filled = ((state.context_pct / 100.0) * bar_width as f32).round() as usize;
+    let filled = filled.min(bar_width);
+    let bar: String = format!("[{}{}]",
+        "█".repeat(filled),
+        "─".repeat(bar_width - filled),
     );
+    writeln!(
+        io::stdout(),
+        "  {} {} {} {}  {} {} {} {}  {} {} {:.0}%  {} ${:.4}  {} {}",
+        "in".with(Color::DarkGrey),
+        format_tokens(state.tokens_input).with(Color::White),
+        "out".with(Color::DarkGrey),
+        format_tokens(state.tokens_output).with(Color::White),
+        "↑".with(Color::DarkGrey),
+        format_tokens(state.tokens_cache_write).with(Color::DarkCyan),
+        "↓".with(Color::DarkGrey),
+        format_tokens(state.tokens_cache_read).with(Color::Cyan),
+        "ctx".with(Color::DarkGrey),
+        bar.with(ctx_color),
+        state.context_pct,
+        "cost".with(Color::DarkGrey),
+        state.cost,
+        "turn".with(Color::DarkGrey),
+        state.turns,
+    )
+    .ok();
+}
+
+fn print_status(msg: &str, color: Color) {
+    println!("\n  {}", msg.with(color));
 }
 
 fn tool_human_label(name: &str, input: &str) -> String {
@@ -437,84 +482,6 @@ fn tool_human_label(name: &str, input: &str) -> String {
     }
 }
 
-const TAIL_LINES: usize = 12;
-const OVERFLOW_THRESHOLD: usize = 2000;
-
-fn print_tool_call(name: &str, input: &str) {
-    let label = tool_human_label(name, input);
-    let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
-    let tag = format!(" {} ", name);
-    let inner = cols.saturating_sub(2); // inside the box borders
-    let label_len = label.chars().count();
-    let tag_len = tag.chars().count();
-    let gap = inner.saturating_sub(1 + label_len + tag_len);
-
-    println!();
-    // header row: ┌ command ··· tag ┐
-    println!(
-        "{}{}{}{}{}",
-        "┌".with(Color::DarkGrey),
-        format!(" {}", label).with(Color::White).bold(),
-        " ".repeat(gap).with(Color::DarkGrey),
-        tag.with(Color::DarkCyan),
-        "┐".with(Color::DarkGrey),
-    );
-}
-
-fn print_tool_result(_name: &str, output: &str, elapsed_ms: u64) {
-    let elapsed = if elapsed_ms >= 1000 {
-        format!("{:.1}s", elapsed_ms as f64 / 1000.0)
-    } else {
-        format!("{}ms", elapsed_ms)
-    };
-
-    let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
-    let inner = cols.saturating_sub(2);
-    let all_lines: Vec<&str> = output.lines().collect();
-    let total = all_lines.len();
-
-    let bar_l = "│".with(Color::DarkGrey);
-    let bar_r = "│".with(Color::DarkGrey);
-
-    // overflow warning
-    if total > OVERFLOW_THRESHOLD {
-        let msg = format!("[Truncated: showing {} of {} lines]", TAIL_LINES, total);
-        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
-        println!("{} {}{}{}", bar_l, msg.with(Color::DarkYellow), pad, bar_r);
-    }
-
-    // top truncation hint
-    if total > TAIL_LINES {
-        let msg = format!("... ({} earlier lines)", total - TAIL_LINES);
-        let pad = " ".repeat(inner.saturating_sub(1 + msg.chars().count()));
-        println!("{} {}{}{}", bar_l, msg.with(Color::DarkGrey), pad, bar_r);
-    }
-
-    // tail lines
-    let tail = &all_lines[total.saturating_sub(TAIL_LINES)..];
-    for line in tail {
-        let truncated = truncate_chars(line, inner.saturating_sub(2));
-        let pad = " ".repeat(inner.saturating_sub(1 + truncated.chars().count()));
-        println!("{} {}{}{}", bar_l, truncated.with(Color::Grey), pad, bar_r);
-    }
-
-    // bottom border + timing
-    let took = format!(" Took {} ", elapsed);
-    let border_fill = inner.saturating_sub(took.chars().count());
-    println!(
-        "{}{}{}{}",
-        "└".with(Color::DarkGrey),
-        took.with(Color::DarkGrey),
-        "─".repeat(border_fill).with(Color::DarkGrey),
-        "┘".with(Color::DarkGrey),
-    );
-    println!();
-}
-
-fn print_status(msg: &str, color: Color) {
-    println!("\n  {}", msg.with(color));
-}
-
 fn truncate_chars(text: &str, max_chars: usize) -> String {
     let mut chars = text.chars();
     let preview: String = chars.by_ref().take(max_chars).collect();
@@ -523,235 +490,4 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     } else {
         preview
     }
-}
-
-/// Render a complete LLM response.
-///
-/// Splits on fenced code blocks:
-/// - Markdown segments  → termimad (headings, bold, lists, etc.)
-/// - Code block content → syntect  (syntax-highlighted, printed directly)
-fn print_response(text: &str) {
-    let mut md_buf = String::new();
-    let mut lines = text.split('\n').peekable();
-
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim_start();
-
-        if trimmed.starts_with("```") {
-            // Flush accumulated markdown first.
-            if !md_buf.is_empty() {
-                termimad::print_text(md_buf.trim_end_matches('\n'));
-                md_buf.clear();
-            }
-
-            let lang = trimmed.trim_start_matches('`').trim();
-
-            // Print the opening fence in dim style.
-            println!("\x1b[2m{line}\x1b[0m");
-
-            // Collect and highlight code body.
-            let mut body = String::new();
-            let mut closed = false;
-            for inner in lines.by_ref() {
-                if inner.trim_start().starts_with("```") {
-                    // Print highlighted body.
-                    let highlighted = highlight::highlight_code(lang, &body);
-                    print!("{highlighted}");
-                    // Print closing fence in dim style.
-                    println!("\x1b[2m{inner}\x1b[0m");
-                    closed = true;
-                    break;
-                }
-                body.push_str(inner);
-                body.push('\n');
-            }
-
-            if !closed {
-                // Unclosed fence — print body plain.
-                print!("{body}");
-            }
-        } else {
-            md_buf.push_str(line);
-            md_buf.push('\n');
-        }
-    }
-
-    // Flush any remaining markdown.
-    if !md_buf.is_empty() {
-        termimad::print_text(md_buf.trim_end_matches('\n'));
-    }
-}
-
-/// Interactive startup picker: select vendor, model, and API key.
-/// Returns (provider, model, api_key).
-fn pick_provider_model_interactive() -> io::Result<(Option<String>, Option<String>, Option<String>)> {
-    let providers: &[(&str, &str, &[&str])] = &[
-        ("anthropic",  "Anthropic",  &["claude-sonnet-4-20250514", "claude-opus-4-5-20250514", "claude-haiku-3-5-20250514"]),
-        ("openai",     "OpenAI",     &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"]),
-        ("google",     "Google",     &["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"]),
-        ("deepseek",   "DeepSeek",   &["deepseek-chat", "deepseek-coder"]),
-        ("groq",       "Groq",       &["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]),
-        ("mistral",    "Mistral",    &["mistral-small-latest", "mistral-large-latest"]),
-        ("openrouter", "OpenRouter", &["anthropic/claude-3.5-sonnet", "google/gemma-3-27b-it", "deepseek/deepseek-chat"]),
-        ("ollama",     "Ollama",     &["llama3", "mistral", "codellama"]),
-    ];
-
-    println!("\n{}", "Select vendor:".with(Color::DarkCyan).bold());
-    for (i, (id, name, _)) in providers.iter().enumerate() {
-        println!("  {}  {} {}", format!("[{i}]").with(Color::DarkGrey), name.with(Color::White), id.with(Color::DarkGrey));
-    }
-    println!("  {}  {}", "[\u{21b5}]".with(Color::DarkGrey), "skip (use env defaults)".with(Color::DarkGrey));
-    print!("\n{} ", "vendor >".with(Color::DarkGreen));
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim();
-
-    if input.is_empty() {
-        return Ok((None, None, None));
-    }
-
-    let provider_entry = input.parse::<usize>()
-        .ok()
-        .and_then(|i| providers.get(i))
-        .or_else(|| providers.iter().find(|(id, name, _)| id.eq_ignore_ascii_case(input) || name.eq_ignore_ascii_case(input)));
-
-    let Some((provider_id, provider_name, models)) = provider_entry else {
-        println!("  {} unknown vendor '{}', using env defaults", "!".with(Color::DarkYellow), input);
-        return Ok((None, None, None));
-    };
-
-    println!("\n{} {}:", "Select model for".with(Color::DarkCyan).bold(), provider_name.with(Color::White));
-    for (i, m) in models.iter().enumerate() {
-        println!("  {}  {}", format!("[{i}]").with(Color::DarkGrey), m.with(Color::White));
-    }
-    println!("  {}  {}", "[\u{21b5}]".with(Color::DarkGrey), format!("default ({})", models[0]).with(Color::DarkGrey));
-    println!("  {}  {}", "[text]".with(Color::DarkGrey), "type any model name".with(Color::DarkGrey));
-    print!("\n{} ", "model  >".with(Color::DarkGreen));
-    io::stdout().flush()?;
-
-    let mut model_input = String::new();
-    io::stdin().read_line(&mut model_input)?;
-    let model_input = model_input.trim();
-
-    let model = if model_input.is_empty() {
-        models[0].to_string()
-    } else if let Ok(i) = model_input.parse::<usize>() {
-        models.get(i).copied().unwrap_or(models[0]).to_string()
-    } else {
-        model_input.to_string()
-    };
-
-    println!("\n  {} {}  {}\n",
-        "using".with(Color::DarkGrey),
-        provider_id.with(Color::DarkCyan),
-        model.as_str().with(Color::White).bold(),
-    );
-
-    let api_key = prompt_api_key_if_needed(provider_id);
-
-    Ok((Some(provider_id.to_string()), Some(model), api_key))
-}
-
-/// Check if the provider already has a key in env; if not, prompt for it (masked).
-fn prompt_api_key_if_needed(provider_id: &str) -> Option<String> {
-    if provider_id == "ollama" {
-        return None;
-    }
-
-    let env_var = match provider_id {
-        "anthropic"  => "ANTHROPIC_API_KEY",
-        "openai"     => "OPENAI_API_KEY",
-        "google"     => "GOOGLE_API_KEY",
-        "deepseek"   => "DEEPSEEK_API_KEY",
-        "groq"       => "GROQ_API_KEY",
-        "mistral"    => "MISTRAL_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        _            => return None,
-    };
-
-    if let Ok(v) = std::env::var(env_var) {
-        if !v.is_empty() {
-            return None;
-        }
-    }
-
-    print!("  {} {} {}: ",
-        "API key".with(Color::DarkCyan),
-        format!("({env_var})").with(Color::DarkGrey),
-        "[Enter to skip]".with(Color::DarkGrey),
-    );
-    let _ = io::stdout().flush();
-
-    let key = read_masked_line().unwrap_or_default();
-    println!();
-
-    if key.is_empty() {
-        println!("  {} no key entered — make sure {} is set\n", "!".with(Color::DarkYellow), env_var);
-        None
-    } else {
-        std::env::set_var(env_var, &key);
-        Some(key)
-    }
-}
-
-/// Infer provider ID from model name prefix (mirrors provider.ts inferProvider).
-fn infer_provider_from_model(model: &str) -> Option<String> {
-    if model.starts_with("claude-") { return Some("anthropic".into()); }
-    if model.starts_with("gpt-") || model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4") {
-        return Some("openai".into());
-    }
-    if model.starts_with("gemini-") { return Some("google".into()); }
-    if model.starts_with("deepseek-") { return Some("deepseek".into()); }
-    if model.starts_with("llama") || model.starts_with("mixtral") { return Some("groq".into()); }
-    if model.starts_with("mistral-") { return Some("mistral".into()); }
-    if model.contains('/') { return Some("openrouter".into()); }
-    None
-}
-
-/// Read a line from stdin without echoing characters (masked password input).
-fn read_masked_line() -> io::Result<String> {
-    use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-    use crossterm::terminal;
-    use crossterm::execute;
-
-    terminal::enable_raw_mode()?;
-    execute!(io::stdout(), event::EnableBracketedPaste)?;
-
-    let mut buf = String::new();
-    let mut stdout = io::stdout();
-
-    loop {
-        match event::read()? {
-            Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => break,
-            Event::Key(KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. }) => {
-                execute!(stdout, event::DisableBracketedPaste)?;
-                terminal::disable_raw_mode()?;
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "ctrl-c"));
-            }
-            Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
-                if buf.pop().is_some() {
-                    print!("\x08 \x08");
-                    let _ = stdout.flush();
-                }
-            }
-            Event::Key(KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT, .. }) => {
-                buf.push(c);
-                print!("*");
-                let _ = stdout.flush();
-            }
-            Event::Paste(text) => {
-                let stars: String = "*".repeat(text.chars().count());
-                buf.push_str(&text);
-                print!("{stars}");
-                let _ = stdout.flush();
-            }
-            _ => {}
-        }
-    }
-
-    execute!(stdout, event::DisableBracketedPaste)?;
-    terminal::disable_raw_mode()?;
-    Ok(buf)
 }

@@ -179,10 +179,12 @@ impl InputBox {
 
     fn reserve(&mut self, state: &State) -> io::Result<()> {
         let mut out = io::stderr();
-        for _ in 0..(BOX_ROWS + 1) {
+        // Reserve rows for: top border + input + bottom border + status line + overlay (top+items+bottom)
+        let total_rows = BOX_ROWS + 1 + (MAX_VISIBLE as u16 + 2);
+        for _ in 0..total_rows {
             out.queue(style::Print("\n"))?;
         }
-        out.queue(cursor::MoveUp(BOX_ROWS + 1))?;
+        out.queue(cursor::MoveUp(total_rows))?;
         out.queue(cursor::MoveToColumn(0))?;
         out.queue(cursor::SavePosition)?;
         out.queue(cursor::Show)?;
@@ -314,8 +316,11 @@ impl InputBox {
     // ── Drawing ───────────────────────────────────────────────────────────────
 
     fn draw(&mut self, state: Option<&State>) -> io::Result<()> {
+        let t0 = std::time::Instant::now();
         let mut out = io::stderr();
+        let term_size_start = std::time::Instant::now();
         let cols          = usize::from(terminal::size().unwrap_or((80, 24)).0).max(1);
+        let term_size_us = term_size_start.elapsed().as_micros();
         let content_width = cols.saturating_sub(4);
         let input_width   = content_width.saturating_sub(UnicodeWidthStr::width(PROMPT));
         let (visible, cursor_col) = self.visible_slice(input_width);
@@ -400,7 +405,13 @@ impl InputBox {
         let cursor_x = (2 + prompt_width + cursor_col).min(cols.saturating_sub(1)) as u16;
         out.queue(cursor::MoveToColumn(cursor_x))?;
         out.queue(cursor::Show)?;
-        out.flush()
+        out.flush()?;
+        let draw_us = t0.elapsed().as_micros();
+        if std::env::var("ITER_PROFILE").is_ok() {
+            let _ = writeln!(std::io::stderr(), "[profile] input::draw total={}µs terminal::size={}µs",
+                draw_us, term_size_us);
+        }
+        Ok(())
     }
 
     /// Draw the slash-command picker overlay below the input box.
@@ -681,7 +692,7 @@ impl InputBox {
 
 // ── Free functions ─────────────────────────────────────────────────────────────
 
-fn format_tokens(n: u32) -> String {
+pub fn format_tokens(n: u32) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {

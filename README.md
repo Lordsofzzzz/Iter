@@ -1,58 +1,35 @@
 # Iter Coding Agent
 
-> Status: In Development - this project may have breaking changes.
+> Status: In Development — breaking changes possible.
 
-A command-line AI coding assistant with a Rust CLI wrapper and TypeScript agent backend.
+A command-line AI coding assistant. Single Rust binary: TUI, agent loop, tool execution, and LLM calls all in-process via [rig-core](https://github.com/0xPlaygrounds/rig).
 
-## Overview
+## Architecture
 
 ```
-Rust CLI
-  main.rs     command entry point
-  agent.rs    TypeScript agent process management
-  rpc.rs      stdin/stdout JSONL protocol types
-  state/      minimal session state
-
-TypeScript Agent
-  agent/src/index.ts
-  agent/src/llm/
-  agent/src/tools/
+iter (single binary)
+  main.rs          CLI entry point, TUI event loop
+  cli.rs           clap command definitions
+  agent.rs         Rig agent loop, streams events to TUI via mpsc
+  agent_event.rs   AgentEvent / TuiCommand channel types
+  context.rs       Message history with auto-compaction at 80% usage
+  tools.rs         Tool impls: read_file, write_file, edit, run_command, list_files, search_files
+  input.rs         Inline bordered input box with slash-command picker
+  state/mod.rs     Minimal runtime state for status bar
 ```
 
-The Rust binary starts the TypeScript agent with `bun`, sends commands over JSONL, streams response text to stdout, and writes agent stderr logs to `agent/logs`.
-
-## Features
-
-- Single-prompt CLI execution
-- Streaming response output
-- Tool call and retry notices on stderr
-- OpenRouter-backed model configuration through the TypeScript agent
+LLM calls go through OpenRouter. Any OpenRouter model ID is accepted.
 
 ## Prerequisites
 
-- Rust: `cargo`, `rustc`
-- Bun: `bun`
-- OpenRouter API key in `OPENROUTER_API_KEY`
+- Rust (`cargo`, `rustc`)
+- `OPENROUTER_API_KEY` environment variable
 
 ## Getting Started
 
-Install dependencies:
-
 ```bash
-cargo build
-cd agent && bun install
-```
-
-Set an API key:
-
-```bash
-export OPENROUTER_API_KEY="your-api-key-here"
-```
-
-Show the command surface:
-
-```bash
-cargo run --bin iter -- --help
+export OPENROUTER_API_KEY="your-key-here"
+cargo build --release
 ```
 
 Run a single prompt:
@@ -61,66 +38,55 @@ Run a single prompt:
 cargo run --bin iter -- ask "summarize this repository"
 ```
 
+Interactive mode (no prompt):
+
+```bash
+cargo run --bin iter -- ask
+```
+
 Use a specific model or working directory:
 
 ```bash
 cargo run --bin iter -- --model "google/gemini-2.5-pro" -C /path/to/project ask "inspect the code"
 ```
 
-## Architecture
+## Options
 
-The CLI and agent communicate via JSONL over stdin/stdout.
-Commands carry an `id`; responses and terminal turn events echo that `id`.
-A submitted prompt is complete only after `agent_end` with `{ success: true }`
-or `{ success: false, error }`.
+| Flag | Env | Description |
+|------|-----|-------------|
+| `-m`, `--model` | `MODEL_NAME` | OpenRouter model ID (default: `deepseek/deepseek-v4-flash:free`) |
+| `-C`, `--workdir` | — | Change working directory before running |
+| `--show-thinking` | — | Print model reasoning/thinking tokens |
 
-Push events from the agent include:
+## Keyboard Shortcuts (interactive mode)
 
-- `agent_start`, `turn_start`, `turn_end`, `agent_end`
-- `text_delta`
-- `thinking_delta`
-- `tool_call`, `tool_result`, `tool_update`
-- `error`
-- `cooldown`, `retry_result`, `auto_retry_start`, `auto_retry_end`
+| Key | Action |
+|-----|--------|
+| `↵` | Submit prompt |
+| `^k` | Abort current request |
+| `^u` | Clear input |
+| `^c` / `^d` | Quit |
+| `/` | Slash-command picker |
 
+## Slash Commands
 
-Pull responses from the agent include:
+| Command | Effect |
+|---------|--------|
+| `/model` | Switch active model |
+| `/provider` | Switch provider |
+| `/clear` | Clear conversation history |
+| `/abort` | Abort current request |
+| `/help` | Show available commands |
 
-- `get_state`
-- `get_session_stats`
-- `set_model`
-- `prompt`
+## Tools available to the agent
 
-## File Structure
-
-```
-src/
-├── main.rs        # CLI entry point
-├── cli.rs         # clap command definitions
-├── agent.rs       # process spawning and message handling
-├── rpc.rs         # protocol types and parsing
-└── state/
-    └── mod.rs     # minimal runtime state
-
-agent/src/
-├── index.ts       # agent entry point
-├── rpc.ts         # protocol types
-├── llm/
-│   ├── client.ts
-│   ├── history.ts
-│   └── stats.ts
-└── utils/
-    ├── retry.ts
-    └── logger.ts
-```
-
-## Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENROUTER_API_KEY` | API key for OpenRouter | required |
-| `MODEL_NAME` | LLM model to use | agent default |
+- `read_file` — read a file
+- `write_file` — write/create a file
+- `edit` — replace first occurrence of text in a file
+- `run_command` — execute a shell command (stdout+stderr interleaved)
+- `list_files` — list a directory
+- `search_files` — glob search for files
 
 ## License
 
-MIT License
+MIT
