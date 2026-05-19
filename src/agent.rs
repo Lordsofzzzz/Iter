@@ -21,6 +21,7 @@ use rig_core::tool::Tool;
 
 use crate::agent_event::{AgentEvent, TuiCommand};
 use crate::context::Context;
+use crate::hooks::{AgentHook, BeforeLlmCtx};
 use crate::tools;
 
 pub struct AgentConfig {
@@ -38,6 +39,7 @@ pub async fn run_agent_loop(
     config: AgentConfig,
     event_tx: mpsc::Sender<AgentEvent>,
     mut cmd_rx: mpsc::Receiver<TuiCommand>,
+    hooks: Vec<Box<dyn AgentHook>>,
 ) {
     let mut client = make_client(&config.api_key);
 
@@ -66,6 +68,7 @@ pub async fn run_agent_loop(
                         &event_tx,
                         &config.system_prompt,
                         &abort_ref,
+                        &hooks,
                     ));
 
                     loop {
@@ -129,6 +132,7 @@ async fn process_prompt(
     event_tx: &mpsc::Sender<AgentEvent>,
     system_prompt: &str,
     abort: &AtomicBool,
+    hooks: &[Box<dyn AgentHook>],
 ) -> bool {
     let t_build = Instant::now();
     let completion_model = client.completion_model(model.to_string());
@@ -161,6 +165,21 @@ async fn process_prompt(
         );
         tool_defs.push(tools::ListFiles.definition(prompt.to_string()).await);
         tool_defs.push(tools::SearchFiles.definition(prompt.to_string()).await);
+
+        // Run context hooks before building the request
+        let mut hook_ctx = BeforeLlmCtx { messages, tool_defs };
+        for hook in hooks {
+            if let Err(e) = hook.on_before_llm(&mut hook_ctx) {
+                let _ = event_tx.send(AgentEvent::Error { message: e }).await;
+                success = false;
+                break;
+            }
+        }
+        if !success {
+            break;
+        }
+        messages = hook_ctx.messages;
+        tool_defs = hook_ctx.tool_defs;
 
         let t_stream = Instant::now();
 
@@ -226,7 +245,6 @@ async fn process_prompt(
                     if let Some(usage) = response.token_usage() {
                         let pct =
                             (usage.total_tokens as f32 / context.context_window as f32) * 100.0;
-                        context.compact_if_needed(pct);
                         let _ = event_tx
                             .send(AgentEvent::TokenUsage {
                                 input: usage.input_tokens as u32,
@@ -287,68 +305,61 @@ async fn process_prompt(
             })
             .collect();
 
-        // Execute all tool calls in parallel
-        let mut handles = Vec::new();
-        for tc in tool_calls {
-            let tx = event_tx.clone();
+        // Determine execution order: sequential if any tool requires it
+        if tool_calls.iter().any(|tc| tool_is_sequential(&tc.function.name)) {
+            // Run all tool calls sequentially
+            for tc in tool_calls {
+                for hook in hooks {
+                    if let Err(e) = hook.on_before_tool(&tc) {
+                        let _ = event_tx.send(AgentEvent::Error { message: e }).await;
+                        success = false;
+                    }
+                }
 
-            handles.push(tokio::spawn(async move {
                 let start = Instant::now();
-                let result = execute_tool(&tc.function.name, &tc.function.arguments, Some(tx)).await;
+                let result = execute_tool(&tc.function.name, &tc.function.arguments, Some(event_tx.clone())).await;
                 let elapsed = start.elapsed().as_millis() as u64;
-                (tc, result, elapsed)
-            }));
-        }
 
-        let results = join_all(handles).await;
-
-        for result in results {
-            match result {
-                Ok((tool_call, Ok(output), elapsed_ms)) => {
-                    let _ = event_tx
-                        .send(AgentEvent::ToolResult {
-                            name: tool_call.function.name.clone(),
-                            output: output.clone(),
-                            elapsed_ms,
-                        })
-                        .await;
-
-                    messages.push(Message::User {
-                        content: OneOrMany::one(UserContent::ToolResult(ToolResult {
-                            id: tool_call.id.clone(),
-                            call_id: tool_call.call_id.clone(),
-                            content: OneOrMany::one(ToolResultContent::Text(Text {
-                                text: output,
-                            })),
-                        })),
-                    });
+                push_tool_result(tc, result, elapsed, &mut messages, hooks, event_tx).await;
+            }
+        } else {
+            // Execute all tool calls in parallel
+            let mut handles = Vec::new();
+            for tc in tool_calls {
+                for hook in hooks {
+                    if let Err(e) = hook.on_before_tool(&tc) {
+                        let _ = event_tx.send(AgentEvent::Error { message: e }).await;
+                        success = false;
+                    }
                 }
-                Ok((tool_call, Err(error), elapsed_ms)) => {
-                    let _ = event_tx
-                        .send(AgentEvent::ToolResult {
-                            name: tool_call.function.name.clone(),
-                            output: error.clone(),
-                            elapsed_ms,
-                        })
-                        .await;
 
-                    messages.push(Message::User {
-                        content: OneOrMany::one(UserContent::ToolResult(ToolResult {
-                            id: tool_call.id.clone(),
-                            call_id: tool_call.call_id.clone(),
-                            content: OneOrMany::one(ToolResultContent::Text(Text {
-                                text: error,
-                            })),
-                        })),
-                    });
-                }
-                Err(e) => {
-                    let _ = event_tx
-                        .send(AgentEvent::Error {
-                            message: e.to_string(),
-                        })
-                        .await;
-                    success = false;
+                let name = tc.function.name.clone();
+                let args = tc.function.arguments.clone();
+                let tx = event_tx.clone();
+
+                handles.push(tokio::spawn(async move {
+                    let start = Instant::now();
+                    let result = execute_tool(&name, &args, Some(tx)).await;
+                    let elapsed = start.elapsed().as_millis() as u64;
+                    (tc, result, elapsed)
+                }));
+            }
+
+            let results = join_all(handles).await;
+
+            for result in results {
+                match result {
+                    Ok((tool_call, output, elapsed_ms)) => {
+                        push_tool_result(tool_call, output, elapsed_ms, &mut messages, hooks, event_tx).await;
+                    }
+                    Err(e) => {
+                        let _ = event_tx
+                            .send(AgentEvent::Error {
+                                message: e.to_string(),
+                            })
+                            .await;
+                        success = false;
+                    }
                 }
             }
         }
@@ -412,4 +423,44 @@ async fn execute_tool(
         }
         _ => Err(format!("unknown tool: {}", name)),
     }
+}
+
+fn tool_is_sequential(name: &str) -> bool {
+    matches!(name, "write_file" | "edit")
+}
+
+async fn push_tool_result(
+    tool_call: ToolCall,
+    result: Result<String, String>,
+    elapsed_ms: u64,
+    messages: &mut Vec<Message>,
+    hooks: &[Box<dyn AgentHook>],
+    event_tx: &mpsc::Sender<AgentEvent>,
+) {
+    let output = match result {
+        Ok(output) => output,
+        Err(error) => error,
+    };
+
+    for hook in hooks {
+        hook.on_after_tool(&tool_call, &output, elapsed_ms);
+    }
+
+    let _ = event_tx
+        .send(AgentEvent::ToolResult {
+            name: tool_call.function.name.clone(),
+            output: output.clone(),
+            elapsed_ms,
+        })
+        .await;
+
+    messages.push(Message::User {
+        content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+            id: tool_call.id.clone(),
+            call_id: tool_call.call_id.clone(),
+            content: OneOrMany::one(ToolResultContent::Text(Text {
+                text: output,
+            })),
+        })),
+    });
 }

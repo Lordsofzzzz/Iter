@@ -2,6 +2,7 @@ mod agent;
 mod agent_event;
 mod cli;
 mod context;
+mod hooks;
 mod input;
 mod state;
 mod tools;
@@ -76,8 +77,12 @@ fn main() -> io::Result<()> {
         ),
     };
 
+    let hooks: Vec<Box<dyn hooks::AgentHook>> = vec![
+        Box::new(hooks::CompactContextHook::new(128_000)),
+    ];
+
     rt.spawn(async move {
-        agent::run_agent_loop(agent_config, event_tx, cmd_rx).await;
+        agent::run_agent_loop(agent_config, event_tx, cmd_rx, hooks).await;
     });
 
     let initial_prompt = match &cli.command {
