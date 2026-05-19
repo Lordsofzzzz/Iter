@@ -22,7 +22,7 @@ pub struct ModelEntry {
 /// Top-level config structure matching the TOML.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelConfig {
-    #[serde(rename = "model")]
+    #[serde(flatten)]
     pub models: HashMap<String, ModelEntry>,
 }
 
