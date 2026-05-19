@@ -37,6 +37,16 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
 /// Maximum number of items shown in the overlay at once.
 const MAX_VISIBLE: usize = 5;
 
+/// Available providers with their display names and env key names.
+const PROVIDERS: &[(&str, &str, &str)] = &[
+    ("openrouter", "OpenRouter",  "OPENROUTER_API_KEY"),
+    ("anthropic",  "Anthropic",   "ANTHROPIC_API_KEY"),
+    ("openai",     "OpenAI",      "OPENAI_API_KEY"),
+    ("google",     "Google",      "GOOGLE_API_KEY"),
+    ("deepseek",   "DeepSeek",    "DEEPSEEK_API_KEY"),
+    ("groq",       "Groq",        "GROQ_API_KEY"),
+];
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 pub enum InputResult {
@@ -52,9 +62,46 @@ pub struct InputBox {
     slash:  Option<SlashState>,
     /// Number of overlay rows drawn in the last frame (used to erase stale overlay).
     prev_overlay_rows: u16,
+    /// Provider picker / API key entry mode.
+    mode: InputMode,
+}
+
+#[derive(Clone, Default)]
+enum InputMode {
+    #[default]
+    Normal,
+    /// Showing the provider list picker.
+    ProviderPicker(ProviderPickerState),
+    /// Typing the API key for a chosen provider.
+    ApiKeyEntry { provider_id: &'static str, provider_name: &'static str, buf: String },
 }
 
 // ── Private types ─────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct ProviderPickerState {
+    selected: usize,
+}
+
+impl ProviderPickerState {
+    fn new() -> Self { Self { selected: 0 } }
+
+    fn move_up(&mut self) {
+        if self.selected == 0 {
+            self.selected = PROVIDERS.len() - 1;
+        } else {
+            self.selected -= 1;
+        }
+    }
+
+    fn move_down(&mut self) {
+        self.selected = (self.selected + 1) % PROVIDERS.len();
+    }
+
+    fn selected_provider(&self) -> (&'static str, &'static str, &'static str) {
+        PROVIDERS[self.selected]
+    }
+}
 
 #[derive(Clone)]
 struct SlashState {
@@ -131,6 +178,7 @@ impl InputBox {
             cursor: 0,
             slash:  None,
             prev_overlay_rows: 0,
+            mode: InputMode::Normal,
         }
     }
 
@@ -158,6 +206,7 @@ impl InputBox {
                 self.buf.clear();
                 self.cursor = 0;
                 self.slash = None;
+                self.mode = InputMode::Normal;
                 self.prev_overlay_rows = 0;
             }
             _ => {
@@ -166,6 +215,7 @@ impl InputBox {
                 self.buf.clear();
                 self.cursor = 0;
                 self.slash = None;
+                self.mode = InputMode::Normal;
                 self.prev_overlay_rows = 0;
             }
         }
@@ -179,8 +229,10 @@ impl InputBox {
 
     fn reserve(&mut self, state: &State) -> io::Result<()> {
         let mut out = io::stderr();
-        // Reserve rows for: top border + input + bottom border + status line + overlay (top+items+bottom)
-        let total_rows = BOX_ROWS + 1 + (MAX_VISIBLE as u16 + 2);
+        // Reserve rows for: box (3) + status (1) + largest possible overlay.
+        // Provider list = PROVIDERS.len() + 2 borders; slash = MAX_VISIBLE + 2; API key = 4.
+        let max_overlay = (PROVIDERS.len() as u16 + 2).max(MAX_VISIBLE as u16 + 2).max(4);
+        let total_rows = BOX_ROWS + 1 + max_overlay;
         for _ in 0..total_rows {
             out.queue(style::Print("\n"))?;
         }
@@ -200,6 +252,92 @@ impl InputBox {
         loop {
             match event::read()? {
                 Event::Key(KeyEvent { code, modifiers, .. }) => {
+
+                    // ── Provider picker mode ───────────────────────────────
+                    if let InputMode::ProviderPicker(_) = &self.mode {
+                        match (code, modifiers) {
+                            (KeyCode::Esc, _) => {
+                                self.mode = InputMode::Normal;
+                            }
+                            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                                if let InputMode::ProviderPicker(ref mut p) = self.mode {
+                                    p.move_up();
+                                }
+                            }
+                            (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                                if let InputMode::ProviderPicker(ref mut p) = self.mode {
+                                    p.move_down();
+                                }
+                            }
+                            (KeyCode::Enter, _) | (KeyCode::Tab, _) => {
+                                if let InputMode::ProviderPicker(ref p) = self.mode {
+                                    let (id, name, _env) = p.selected_provider();
+                                    self.mode = InputMode::ApiKeyEntry {
+                                        provider_id:   id,
+                                        provider_name: name,
+                                        buf:           String::new(),
+                                    };
+                                }
+                            }
+                            (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                            | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                return Ok(InputResult::Quit);
+                            }
+                            _ => {}
+                        }
+                        self.draw(Some(state))?;
+                        continue;
+                    }
+
+                    // ── API key entry mode ─────────────────────────────────
+                    if let InputMode::ApiKeyEntry { .. } = &self.mode {
+                        match (code, modifiers) {
+                            (KeyCode::Esc, _) => {
+                                // Back to provider picker.
+                                self.mode = InputMode::ProviderPicker(ProviderPickerState::new());
+                            }
+                            (KeyCode::Enter, _) => {
+                                if let InputMode::ApiKeyEntry { provider_id, buf, .. } =
+                                    std::mem::replace(&mut self.mode, InputMode::Normal)
+                                {
+                                    let key = buf.trim().to_string();
+                                    if !key.is_empty() {
+                                        return Ok(InputResult::Submit(
+                                            format!("/provider {} {}", provider_id, key),
+                                        ));
+                                    }
+                                    // Empty key — go back to picker.
+                                    self.mode = InputMode::ProviderPicker(ProviderPickerState::new());
+                                }
+                            }
+                            (KeyCode::Backspace, _) => {
+                                if let InputMode::ApiKeyEntry { ref mut buf, .. } = self.mode {
+                                    buf.pop();
+                                }
+                            }
+                            (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                                if let InputMode::ApiKeyEntry { ref mut buf, .. } = self.mode {
+                                    buf.clear();
+                                }
+                            }
+                            (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                            | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                return Ok(InputResult::Quit);
+                            }
+                            (KeyCode::Char(c), mods)
+                                if !mods.contains(KeyModifiers::CONTROL)
+                                    && !mods.contains(KeyModifiers::ALT) =>
+                            {
+                                if let InputMode::ApiKeyEntry { ref mut buf, .. } = self.mode {
+                                    buf.push(c);
+                                }
+                            }
+                            _ => {}
+                        }
+                        self.draw(Some(state))?;
+                        continue;
+                    }
+
                     match (code, modifiers) {
                         // ── Slash-mode navigation ──────────────────────────
                         (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
@@ -220,10 +358,18 @@ impl InputBox {
                         {
                             // Complete the selected command.
                             if let Some(cmd) = self.slash.as_ref().unwrap().selected_cmd() {
-                                // Replace buffer with completed command + space.
-                                self.buf = format!("{cmd} ");
-                                self.cursor = self.buf.len();
-                                self.slash = None;
+                                if cmd == "/provider" {
+                                    // Launch provider picker instead of normal completion.
+                                    self.buf.clear();
+                                    self.cursor = 0;
+                                    self.slash = None;
+                                    self.mode = InputMode::ProviderPicker(ProviderPickerState::new());
+                                } else {
+                                    // Replace buffer with completed command + space.
+                                    self.buf = format!("{cmd} ");
+                                    self.cursor = self.buf.len();
+                                    self.slash = None;
+                                }
                             }
                         }
 
@@ -384,7 +530,13 @@ impl InputBox {
             out.queue(cursor::MoveToColumn(0))?;
         }
 
-        let new_overlay_rows = if let Some(slash) = self.slash.clone() {
+        let new_overlay_rows = if let InputMode::ProviderPicker(ref picker) = self.mode {
+            self.draw_provider_overlay(&mut out, picker, cols)?;
+            PROVIDERS.len() as u16 + 2
+        } else if let InputMode::ApiKeyEntry { provider_name, ref buf, .. } = self.mode {
+            self.draw_apikey_overlay(&mut out, provider_name, buf, cols)?;
+            4u16 // top border + prompt row + input row + bottom border
+        } else if let Some(slash) = self.slash.clone() {
             let count = slash.matches.len().min(MAX_VISIBLE);
             if count > 0 {
                 // Cursor is at status line row; draw_slash_overlay starts one MoveDown below.
@@ -490,6 +642,124 @@ impl InputBox {
             border_line('╰', '╯', "", cols).with(Color::DarkCyan),
         ))?;
         // Cursor is now at bottom of overlay. draw() will MoveUp back to input row.
+
+        Ok(())
+    }
+
+    /// Draw the provider picker overlay.
+    fn draw_provider_overlay(
+        &self,
+        out:    &mut io::Stderr,
+        picker: &ProviderPickerState,
+        cols:   usize,
+    ) -> io::Result<()> {
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╭', '╮', " select provider ", cols).with(Color::Magenta),
+        ))?;
+
+        for (i, (id, name, env_key)) in PROVIDERS.iter().enumerate() {
+            let is_selected = i == picker.selected;
+            out.queue(cursor::MoveDown(1))?;
+            out.queue(cursor::MoveToColumn(0))?;
+
+            let inner  = cols.saturating_sub(4);
+            let id_w   = UnicodeWidthStr::width(*id);
+            let name_w = UnicodeWidthStr::width(*name);
+            let env_w  = UnicodeWidthStr::width(*env_key);
+            let gap1   = 14usize.saturating_sub(id_w);
+            let gap2   = 2usize;
+            let pad    = inner.saturating_sub(id_w + gap1 + name_w + gap2 + env_w);
+
+            out.queue(style::PrintStyledContent("│ ".with(Color::Magenta)))?;
+            if is_selected {
+                out.queue(style::PrintStyledContent(id.with(Color::White).bold()))?;
+                out.queue(style::Print(" ".repeat(gap1)))?;
+                out.queue(style::PrintStyledContent(name.with(Color::White)))?;
+                out.queue(style::Print(" ".repeat(gap2)))?;
+                out.queue(style::PrintStyledContent(env_key.with(Color::DarkGrey)))?;
+                out.queue(style::Print(" ".repeat(pad)))?;
+                out.queue(style::PrintStyledContent(" │".with(Color::Magenta)))?;
+            } else {
+                out.queue(style::PrintStyledContent(id.with(Color::DarkMagenta)))?;
+                out.queue(style::Print(" ".repeat(gap1)))?;
+                out.queue(style::PrintStyledContent(name.with(Color::Grey)))?;
+                out.queue(style::Print(" ".repeat(gap2)))?;
+                out.queue(style::PrintStyledContent(env_key.with(Color::DarkGrey)))?;
+                out.queue(style::Print(" ".repeat(pad)))?;
+                out.queue(style::PrintStyledContent(" │".with(Color::Magenta)))?;
+            }
+        }
+
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╰', '╯', " ↑↓ select  ↵ confirm  esc cancel ", cols).with(Color::DarkMagenta),
+        ))?;
+
+        Ok(())
+    }
+
+    /// Draw the API key entry overlay.
+    fn draw_apikey_overlay(
+        &self,
+        out:           &mut io::Stderr,
+        provider_name: &str,
+        key_buf:       &str,
+        cols:          usize,
+    ) -> io::Result<()> {
+        let title = format!(" {} API key ", provider_name);
+
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╭', '╮', &title, cols).with(Color::Magenta),
+        ))?;
+
+        // Hint row
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        let hint  = "paste or type your API key, then press ↵";
+        let hint_w = UnicodeWidthStr::width(hint);
+        let inner  = cols.saturating_sub(4);
+        let pad    = inner.saturating_sub(hint_w);
+        out.queue(style::PrintStyledContent("│ ".with(Color::Magenta)))?;
+        out.queue(style::PrintStyledContent(hint.with(Color::DarkGrey)))?;
+        out.queue(style::Print(" ".repeat(pad)))?;
+        out.queue(style::PrintStyledContent(" │".with(Color::Magenta)))?;
+
+        // Key input row — show last 4 chars, rest masked
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        if key_buf.is_empty() {
+            let ph   = "sk-…";
+            let ph_w = UnicodeWidthStr::width(ph);
+            let pad2 = inner.saturating_sub(ph_w);
+            out.queue(style::PrintStyledContent("│ ".with(Color::Magenta)))?;
+            out.queue(style::PrintStyledContent(ph.with(Color::DarkGrey)))?;
+            out.queue(style::Print(" ".repeat(pad2)))?;
+            out.queue(style::PrintStyledContent(" │".with(Color::Magenta)))?;
+        } else {
+            let suffix: String = key_buf.chars().rev().take(4).collect::<String>()
+                                         .chars().rev().collect();
+            let masked_count = key_buf.len().saturating_sub(4);
+            let masked       = "•".repeat(masked_count);
+            let full_w       = masked_count + UnicodeWidthStr::width(suffix.as_str());
+            let pad2         = inner.saturating_sub(full_w);
+            out.queue(style::PrintStyledContent("│ ".with(Color::Magenta)))?;
+            out.queue(style::PrintStyledContent(masked.as_str().with(Color::DarkGrey)))?;
+            out.queue(style::PrintStyledContent(suffix.as_str().with(Color::White)))?;
+            out.queue(style::Print(" ".repeat(pad2)))?;
+            out.queue(style::PrintStyledContent(" │".with(Color::Magenta)))?;
+        }
+
+        // Bottom border
+        out.queue(cursor::MoveDown(1))?;
+        out.queue(cursor::MoveToColumn(0))?;
+        out.queue(style::PrintStyledContent(
+            border_line('╰', '╯', " ↵ confirm  esc back ", cols).with(Color::DarkMagenta),
+        ))?;
 
         Ok(())
     }

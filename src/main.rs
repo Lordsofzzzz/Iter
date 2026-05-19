@@ -238,6 +238,16 @@ async fn handle_turn(
                 state.tool_calls += 1;
                 print_tool_call(&name, &input);
             }
+            AgentEvent::ToolOutput { delta } => {
+                let cols = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+                let inner = cols.saturating_sub(2);
+                let bar_l = "│".with(Color::DarkGrey);
+                let bar_r = "│".with(Color::DarkGrey);
+                let truncated = truncate_chars(&delta, inner.saturating_sub(2));
+                let pad = " ".repeat(inner.saturating_sub(1 + truncated.chars().count()));
+                println!("{} {}{}{}", bar_l, truncated.with(Color::Grey), pad, bar_r);
+                io::stdout().flush().ok();
+            }
             AgentEvent::ToolResult { name, output, elapsed_ms } => {
                 last_char = '\n';
                 state.pending_tool_call = None;
@@ -317,12 +327,27 @@ fn handle_slash_command(
             true
         }
         "/provider" => {
-            if arg.is_empty() {
-                println!("  {}", "usage: /provider <provider-id>".with(Color::DarkYellow));
+            // Format from UI: /provider <id> <api_key>
+            let mut parts = arg.splitn(2, ' ');
+            let provider_id  = parts.next().unwrap_or("").trim();
+            let api_key      = parts.next().unwrap_or("").trim();
+
+            if provider_id.is_empty() {
+                println!("  {}", "usage: /provider <id> [api_key]".with(Color::DarkYellow));
             } else {
-                state.provider_name = arg.to_string();
-                let _ = cmd_tx.try_send(TuiCommand::SetProvider(arg.to_string()));
-                println!("  {} {}", "provider set to".with(Color::DarkGrey), arg.with(Color::White));
+                // Store key in env so agent can pick it up via make_client().
+                if !api_key.is_empty() {
+                    let env_var = format!("{}_API_KEY", provider_id.to_uppercase().replace('-', "_"));
+                    std::env::set_var(&env_var, api_key);
+                }
+                state.provider_name = provider_id.to_string();
+                let _ = cmd_tx.try_send(TuiCommand::SetProvider(provider_id.to_string()));
+                println!(
+                    "  {} {}{}",
+                    "provider set to".with(Color::DarkGrey),
+                    provider_id.with(Color::White),
+                    if api_key.is_empty() { "" } else { " (key saved)" },
+                );
             }
             true
         }
