@@ -1,6 +1,7 @@
 mod agent;
 mod agent_event;
 mod cli;
+mod config;
 mod context;
 mod hooks;
 mod input;

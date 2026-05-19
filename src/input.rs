@@ -37,22 +37,10 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
 /// Maximum number of items shown in the overlay at once.
 const MAX_VISIBLE: usize = 5;
 
-/// Free models available via OpenRouter.
-/// (model_id, display_name, context_window)
-const FREE_MODELS: &[(&str, &str, &str)] = &[
-    ("deepseek/deepseek-v4-flash:free",               "DeepSeek V4 Flash",       "64k"),
-    ("deepseek/deepseek-r1:free",                     "DeepSeek R1",             "64k"),
-    ("deepseek/deepseek-r1-0528:free",                "DeepSeek R1 0528",        "64k"),
-    ("google/gemini-2.5-flash-preview:free",          "Gemini 2.5 Flash",        "1M"),
-    ("google/gemini-2.0-flash-thinking-exp:free",     "Gemini 2.0 Flash Think",  "1M"),
-    ("meta-llama/llama-4-scout:free",                 "Llama 4 Scout",           "128k"),
-    ("meta-llama/llama-4-maverick:free",               "Llama 4 Maverick",        "128k"),
-    ("meta-llama/llama-3.3-70b-instruct:free",        "Llama 3.3 70B",           "128k"),
-    ("mistralai/mistral-7b-instruct:free",            "Mistral 7B",              "32k"),
-    ("qwen/qwen3-235b-a22b:free",                     "Qwen3 235B",              "128k"),
-    ("qwen/qwen3-30b-a3b:free",                       "Qwen3 30B",               "128k"),
-    ("microsoft/phi-4-reasoning-plus:free",           "Phi-4 Reasoning+",        "32k"),
-];
+/// Load model entries from config (default-models.toml + ~/.iter/models.toml).
+fn model_entries() -> &'static [(&'static str, &'static str, &'static str)] {
+    crate::config::global_model_entries()
+}
 
 /// Available providers with their display names and env key names.
 const PROVIDERS: &[(&str, &str, &str)] = &[
@@ -133,7 +121,7 @@ impl ModelPickerState {
 
     fn move_up(&mut self) {
         if self.selected == 0 {
-            self.selected = FREE_MODELS.len() - 1;
+            self.selected = model_entries().len() - 1;
         } else {
             self.selected -= 1;
         }
@@ -141,7 +129,7 @@ impl ModelPickerState {
     }
 
     fn move_down(&mut self) {
-        self.selected = (self.selected + 1) % FREE_MODELS.len();
+        self.selected = (self.selected + 1) % model_entries().len();
         self.sync_scroll();
     }
 
@@ -154,7 +142,7 @@ impl ModelPickerState {
     }
 
     fn selected_model(&self) -> (&'static str, &'static str, &'static str) {
-        FREE_MODELS[self.selected]
+        model_entries()[self.selected]
     }
 }
 
@@ -285,9 +273,9 @@ impl InputBox {
     fn reserve(&mut self, state: &State) -> io::Result<()> {
         let mut out = io::stderr();
         // Reserve rows for: box (3) + status (1) + largest possible overlay.
-        // Provider list = PROVIDERS.len() + 2; model list = min(FREE_MODELS.len(), MAX_VISIBLE) + 2;
+        // Provider list = PROVIDERS.len() + 2; model list = min(model_entries().len(), MAX_VISIBLE) + 2;
         // slash = MAX_VISIBLE + 2; API key = 4.
-        let model_count = (FREE_MODELS.len() as u16).min(MAX_VISIBLE as u16);
+        let model_count = (model_entries().len() as u16).min(MAX_VISIBLE as u16);
         let max_overlay = (PROVIDERS.len() as u16 + 2)
             .max(model_count + 2)
             .max(MAX_VISIBLE as u16 + 2)
@@ -636,7 +624,7 @@ impl InputBox {
             4u16 // top border + prompt row + input row + bottom border
         } else if let InputMode::ModelPicker(ref picker) = self.mode {
             self.draw_model_overlay(&mut out, picker, cols)?;
-            (FREE_MODELS.len() as u16).min(MAX_VISIBLE as u16) + 2
+            (model_entries().len() as u16).min(MAX_VISIBLE as u16) + 2
         } else if let Some(slash) = self.slash.clone() {
             let count = slash.matches.len().min(MAX_VISIBLE);
             if count > 0 {
@@ -878,8 +866,8 @@ impl InputBox {
             border_line('╭', '╮', " select model ", cols).with(Color::Cyan),
         ))?;
 
-        let visible_count = FREE_MODELS.len().min(MAX_VISIBLE);
-        let visible_slice = &FREE_MODELS[picker.scroll..picker.scroll + visible_count];
+        let visible_count = model_entries().len().min(MAX_VISIBLE);
+        let visible_slice = &model_entries()[picker.scroll..picker.scroll + visible_count];
 
         let model_col_width = visible_slice
             .iter()

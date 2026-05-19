@@ -21,6 +21,8 @@ futures       = "0.3"
 thiserror     = "1"
 glob          = "0.3"
 tiktoken-rs   = "0.5"
+toml          = "0.8"
+dirs          = "5"
 
 [[bin]]
 name = "test_mad"
