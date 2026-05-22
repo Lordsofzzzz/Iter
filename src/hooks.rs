@@ -82,7 +82,7 @@ pub fn estimate_tokens(messages: &[Message]) -> usize {
     }
 
     // 3.5 chars/token is a safe cross-model average; ceiling to avoid undercount.
-    chars.div_ceil(3)
+    (chars * 2).div_ceil(7)
 }
 
 /// Built-in hook that prunes messages when estimated tokens exceed a threshold.

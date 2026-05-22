@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures::future::join_all;
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use tokio::sync::mpsc;
 
@@ -382,9 +382,14 @@ async fn process_prompt(
 
                 push_tool_result(tc, result, elapsed, &mut messages, hooks, event_tx).await;
             }
+            if !success {
+                break;
+            }
         } else {
-            // Execute all tool calls in parallel
-            let mut handles = Vec::new();
+            // Execute all tool calls in parallel.
+            // Use FuturesUnordered so push_tool_result fires as each tool
+            // completes, rather than waiting for the slowest one.
+            let mut handles = FuturesUnordered::new();
             for tc in tool_calls {
                 let mut hook_blocked = false;
                 for hook in hooks {
@@ -396,7 +401,7 @@ async fn process_prompt(
                     }
                 }
                 if hook_blocked {
-                    continue;
+                    break;
                 }
 
                 let name = tc.function.name.clone();
@@ -411,13 +416,9 @@ async fn process_prompt(
                 }));
             }
 
-            let results = join_all(handles).await;
-
-            // Push all completed results first (order matters for LLM context),
-            // then surface any panics. Breaking after a panic avoids sending the
-            // LLM an incomplete tool-call/result set on the next turn.
+            // Process results as they complete — fast tools render first.
             let mut panicked: Vec<String> = Vec::new();
-            for result in results {
+            while let Some(result) = handles.next().await {
                 match result {
                     Ok((tool_call, output, elapsed_ms)) => {
                         push_tool_result(tool_call, output, elapsed_ms, &mut messages, hooks, event_tx).await;
@@ -463,7 +464,11 @@ async fn execute_tool(
         "read_file" => {
             let a: tools::ReadFileArgs =
                 serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
-            tools::ReadFile.call(a).await.map_err(|e| e.to_string())
+            let result = tools::ReadFile.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
         }
         "write_file" => {
             let a: tools::WriteFileArgs =
@@ -486,19 +491,41 @@ async fn execute_tool(
         "list_files" => {
             let a: tools::ListFilesArgs =
                 serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
-            tools::ListFiles.call(a).await.map_err(|e| e.to_string())
+            let result = tools::ListFiles.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
         }
         "search_files" => {
             let a: tools::SearchFilesArgs =
                 serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
-            tools::SearchFiles.call(a).await.map_err(|e| e.to_string())
+            let result = tools::SearchFiles.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
         }
         "grep" => {
             let a: tools::GrepArgs =
                 serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
-            tools::Grep.call(a).await.map_err(|e| e.to_string())
+            let result = tools::Grep.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
         }
         _ => Err(format!("unknown tool: {}", name)),
+    }
+}
+
+/// Split a tool's text output into lines and emit each as a ToolOutput
+/// event so the TUI renders intermediate content before the final ToolResult.
+async fn emit_tool_output(event_tx: &Option<mpsc::Sender<AgentEvent>>, output: &str) {
+    if let Some(ref tx) = event_tx {
+        for line in output.lines() {
+            let _ = tx.send(AgentEvent::ToolOutput { delta: line.to_string() }).await;
+        }
     }
 }
 

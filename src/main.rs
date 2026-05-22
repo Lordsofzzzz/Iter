@@ -639,7 +639,7 @@ fn truncate_display(text: &str, max_cols: usize) -> String {
     while let Some(ch) = chars.next() {
         let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
         if width + w > max_cols {
-            if chars.peek().is_some() {
+            if chars.peek().is_some() && width < max_cols {
                 result.push('…');
             }
             break;

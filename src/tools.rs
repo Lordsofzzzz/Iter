@@ -282,16 +282,17 @@ impl RunCommand {
                 line = stderr_lines.next_line(), if !stderr_done => {
                     match line.map_err(|e| RunCommandError(e.to_string()))? {
                         Some(l) => {
-                            if result.len() < RUN_COMMAND_MAX_OUTPUT {
+                            if result.len() >= RUN_COMMAND_MAX_OUTPUT {
+                                if !truncated {
+                                    result.push_str("\n[output truncated — limit reached]");
+                                    truncated = true;
+                                }
+                            } else {
                                 result.push_str(&l);
                                 result.push('\n');
                             }
-                            // Only relay stderr to the UI while still buffering
-                            // to avoid flooding the event channel with 1MB+ of output.
-                            if result.len() < RUN_COMMAND_MAX_OUTPUT {
-                                if let Some(ref tx) = tx {
-                                    let _ = tx.send(AgentEvent::ToolOutput { delta: l }).await;
-                                }
+                            if let Some(ref tx) = tx {
+                                let _ = tx.send(AgentEvent::ToolOutput { delta: l }).await;
                             }
                         }
                         None => stderr_done = true,
