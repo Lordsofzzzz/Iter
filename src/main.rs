@@ -23,8 +23,6 @@ use cli::Cli;
 use input::{format_tokens, InputBox, InputResult};
 use state::State;
 
-// FIX: cache ITER_PROFILE check once at startup instead of calling env::var
-// on every trace!() invocation (which is a syscall every streaming token).
 fn is_profile() -> bool {
     static PROFILE: OnceLock<bool> = OnceLock::new();
     *PROFILE.get_or_init(|| std::env::var("ITER_PROFILE").is_ok())
@@ -60,15 +58,12 @@ fn main() -> io::Result<()> {
         api_key
     };
 
-    // FIX: look up context window from config so the % bar and compaction
-    // threshold are correct for the chosen model, not always 128k.
     let context_window = config::global_model_config()
         .models
         .get(&model)
         .and_then(|m| m.context_window)
         .unwrap_or(128_000);
 
-    // FIX: look up cost rates for the chosen model so the cost bar is real.
     let cost_input_per_mtok = config::global_model_config()
         .models
         .get(&model)
@@ -112,7 +107,6 @@ fn main() -> io::Result<()> {
             cwd,
             std::env::consts::OS,
         ),
-        // FIX: pass the real context window so agent/hooks use it.
         context_window,
     };
 
@@ -140,7 +134,6 @@ fn interactive_loop(
     initial_prompt: Option<String>,
 ) -> io::Result<()> {
     if initial_prompt.is_none() {
-        // FIX: use env!() so the version stays in sync with Cargo.toml.
         println!(
             "{}  {}  {}",
             "iter".with(Color::DarkGreen).bold(),
@@ -208,8 +201,6 @@ async fn handle_turn(
 
     let mut term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
 
-    // FIX: track whether AgentEnd was received so we can detect a premature
-    // channel close (agent task panic).
     let mut received_agent_end = false;
 
     while let Some(event) = event_rx.recv().await {
@@ -296,7 +287,6 @@ async fn handle_turn(
                 let inner = cols.saturating_sub(2);
                 let bar_l = "│".with(Color::DarkGrey);
                 let bar_r = "│".with(Color::DarkGrey);
-                // FIX: truncate by display width, pad by display width.
                 let truncated = truncate_display(&delta, inner.saturating_sub(2));
                 let truncated_w = UnicodeWidthStr::width(truncated.as_str());
                 let pad = " ".repeat(inner.saturating_sub(1 + truncated_w));
@@ -309,7 +299,6 @@ async fn handle_turn(
                 print_tool_result(&name, &output, elapsed_ms);
             }
             AgentEvent::TokenUsage { input, output, total, cache_read, cache_write, context_pct } => {
-                // FIX: compute cost from rates stored in state.
                 let new_cost = (input as f64 * state.cost_input_per_mtok / 1_000_000.0)
                     + (output as f64 * state.cost_output_per_mtok / 1_000_000.0);
                 state.cost += new_cost;
@@ -387,9 +376,6 @@ async fn handle_turn(
         }
     }
 
-    // FIX: if the loop exited without receiving AgentEnd, the agent task
-    // panicked or was dropped — surface an error rather than silently
-    // returning an empty turn.
     if !received_agent_end {
         print_status("agent task terminated unexpectedly", Color::DarkRed);
     }
@@ -421,7 +407,8 @@ fn handle_slash_command(
         }
         "/model" => {
             if arg.is_empty() {
-                println!("  {}", "usage: /model <model-id>".with(Color::DarkYellow));
+                println!("  {} {}", "current:".with(Color::DarkGrey), state.model_name.as_str().with(Color::White));
+                println!("  {}", "use /models to list all, /model <id> to switch".with(Color::DarkGrey));
             } else {
                 state.model_name = arg.to_string();
                 let _ = cmd_tx.try_send(TuiCommand::SetModel(arg.to_string()));
@@ -429,10 +416,29 @@ fn handle_slash_command(
             }
             true
         }
+        "/models" => {
+            let entries = config::global_model_entries();
+            let current = state.model_name.as_str();
+            println!();
+            for (id, name, ctx) in entries {
+                let marker = if *id == current { "\u{25b8}" } else { " " };
+                let ctx_str = if ctx.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", ctx.with(Color::DarkGrey))
+                };
+                println!(
+                    "  {} {}  {}{}",
+                    marker.with(Color::DarkCyan),
+                    id.with(Color::White),
+                    name.with(Color::DarkGrey),
+                    ctx_str,
+                );
+            }
+            println!();
+            true
+        }
         "/provider" => {
-            // Format from UI: /provider <id> [api_key]
-            // FIX: use splitn(2) so the key is the full remainder, not just
-            // the first word — keys could theoretically contain spaces.
             let mut parts = arg.splitn(2, ' ');
             let provider_id = parts.next().unwrap_or("").trim();
             let api_key     = parts.next().unwrap_or("").trim();
@@ -440,12 +446,6 @@ fn handle_slash_command(
             if provider_id.is_empty() {
                 println!("  {}", "usage: /provider <id> [api_key]".with(Color::DarkYellow));
             } else {
-                // FIX: do NOT call std::env::set_var from the main thread while
-                // the tokio runtime thread is live — that is UB since Rust 1.81.
-                // Instead, pass the key through the TuiCommand channel so the
-                // agent task receives it safely in its own context.
-                // The agent already reads env vars only during make_client(), so
-                // sending SetProvider with a bundled key is the right channel.
                 if !api_key.is_empty() {
                     let _ = cmd_tx.try_send(TuiCommand::SetProviderWithKey {
                         provider: provider_id.to_string(),
@@ -466,7 +466,8 @@ fn handle_slash_command(
         }
         "/help" => {
             println!("  {}", "commands:".with(Color::DarkGrey));
-            println!("  {}  {}", "/model <id>   ".with(Color::White), "switch model".with(Color::DarkGrey));
+            println!("  {}  {}", "/models       ".with(Color::White), "list available models".with(Color::DarkGrey));
+            println!("  {}  {}", "/model <id>   ".with(Color::White), "switch model (no arg = show current)".with(Color::DarkGrey));
             println!("  {}  {}", "/provider <id>".with(Color::White), "switch provider".with(Color::DarkGrey));
             println!("  {}  {}", "/clear        ".with(Color::White), "clear conversation history".with(Color::DarkGrey));
             println!("  {}  {}", "/abort        ".with(Color::White), "abort current request".with(Color::DarkGrey));
@@ -482,7 +483,6 @@ fn print_tool_call(name: &str, input: &str) {
     let cols = terminal::size().unwrap_or((80, 24)).0 as usize;
     let tag = format!(" {} ", name);
     let inner = cols.saturating_sub(2);
-    // FIX: use display width, not char count, for layout.
     let tag_w = UnicodeWidthStr::width(tag.as_str());
     // Reserve space: 1 leading space + label + gap + tag, all inside inner.
     let available_for_label = inner.saturating_sub(tag_w + 2);
@@ -516,9 +516,6 @@ fn print_tool_result(_name: &str, output: &str, elapsed_ms: u64) {
     let bar_l = "│".with(Color::DarkGrey);
     let bar_r = "│".with(Color::DarkGrey);
 
-    // FIX: mutually exclusive truncation notices — the old code printed both
-    // "[Truncated: showing 12 of N]" AND "... (N-12 earlier lines)" for any
-    // output over 2000 lines.
     if total > 2000 {
         let msg = format!("[Truncated: showing 12 of {} lines]", total);
         let msg_w = UnicodeWidthStr::width(msg.as_str());
@@ -533,7 +530,6 @@ fn print_tool_result(_name: &str, output: &str, elapsed_ms: u64) {
 
     let tail = &all_lines[total.saturating_sub(12)..];
     for line in tail {
-        // FIX: truncate by display width, pad by display width.
         let truncated = truncate_display(line, inner.saturating_sub(2));
         let truncated_w = UnicodeWidthStr::width(truncated.as_str());
         let pad = " ".repeat(inner.saturating_sub(1 + truncated_w));

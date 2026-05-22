@@ -57,7 +57,6 @@ impl Tool for ReadFile {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // FIX: use tokio::fs to avoid blocking the single-threaded runtime.
         tokio::fs::read_to_string(&args.path)
             .await
             .map_err(|e| ReadFileError(e.to_string()))
@@ -105,7 +104,6 @@ impl Tool for WriteFile {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // FIX: use tokio::fs throughout.
         if let Some(parent) = std::path::Path::new(&args.path).parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -221,8 +219,6 @@ impl Tool for RunCommand {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // FIX: wrap the entire command execution in a timeout so that blocking
-        // commands (sleep, cat /dev/urandom, etc.) cannot hang the agent forever.
         let result = tokio::time::timeout(RUN_COMMAND_TIMEOUT, self.run_inner(args)).await;
         match result {
             Ok(inner) => inner,
@@ -265,7 +261,6 @@ impl RunCommand {
                 line = stdout_lines.next_line(), if !stdout_done => {
                     match line.map_err(|e| RunCommandError(e.to_string()))? {
                         Some(l) => {
-                            // FIX: cap output to avoid OOM on runaway commands.
                             if result.len() >= RUN_COMMAND_MAX_OUTPUT {
                                 if !truncated {
                                     result.push_str("\n[output truncated — limit reached]");
@@ -351,7 +346,6 @@ impl Tool for ListFiles {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let path = args.path.unwrap_or_else(|| ".".to_string());
 
-        // FIX: use tokio::fs::read_dir to avoid blocking the runtime.
         let mut read_dir = tokio::fs::read_dir(&path)
             .await
             .map_err(|e| ListFilesError(e.to_string()))?;

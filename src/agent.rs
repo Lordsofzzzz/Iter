@@ -176,8 +176,6 @@ async fn process_prompt(
     messages.extend(context.messages.clone());
     messages.push(Message::user(prompt));
 
-    // FIX: build tool definitions once — all tools ignore the prompt arg,
-    // so rebuilding them on every loop iteration is pure waste.
     let static_tool_defs = {
         let mut defs = Vec::new();
         defs.push(tools::ReadFile.definition(prompt.to_string()).await);
@@ -329,7 +327,6 @@ async fn process_prompt(
             break 'request stream;
         };
 
-        // FIX: removed dead `if !success { success = false; }` inner branch.
         if !success || abort.load(Ordering::Acquire) {
             break;
         }
@@ -366,7 +363,6 @@ async fn process_prompt(
         if tool_calls.iter().any(|tc| tool_is_sequential(&tc.function.name)) {
             // Run all tool calls sequentially
             for tc in tool_calls {
-                // FIX: hook error now skips tool execution for this call.
                 let mut hook_blocked = false;
                 for hook in hooks {
                     if let Err(e) = hook.on_before_tool(&tc) {
@@ -390,7 +386,6 @@ async fn process_prompt(
             // Execute all tool calls in parallel
             let mut handles = Vec::new();
             for tc in tool_calls {
-                // FIX: hook error skips spawning this tool.
                 let mut hook_blocked = false;
                 for hook in hooks {
                     if let Err(e) = hook.on_before_tool(&tc) {
