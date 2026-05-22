@@ -1,257 +1,629 @@
-//! Agent process management and message handling.
-//!
-//! Spawns the TypeScript agent as a child process and handles bidirectional
-//! JSONL communication over stdin/stdout.
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
-use std::fs;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
-use std::sync::mpsc::Sender;
-use std::thread;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
+use tokio::sync::mpsc;
 
-use crate::rpc::{self, AgentMessage, PushEvent, StateData, UiEvent};
-use crate::state::{ChatMessage, MsgKind, ModelStatus};
+use rig_core::client::CompletionClient;
+use rig_core::completion::message::{
+    AssistantContent, Message, ReasoningContent, Text, ToolCall, ToolResult, ToolResultContent,
+    UserContent,
+};
+use rig_core::completion::request::CompletionRequest;
+use rig_core::completion::{CompletionModel, GetTokenUsage};
+use rig_core::one_or_many::OneOrMany;
+use rig_core::providers::openrouter;
+use rig_core::streaming::StreamedAssistantContent;
+use rig_core::tool::Tool;
 
-// ============================================================================
-// Constants
-// ============================================================================
+use crate::agent_event::{AgentEvent, TuiCommand};
+use crate::context::Context;
+use crate::hooks::{AgentHook, BeforeLlmCtx};
+use crate::tools;
 
-/// Relative path to the TypeScript agent entry point.
-const AGENT_ENTRY_PATH: &str = "agent/src/index.ts";
+pub struct AgentConfig {
+    pub model: String,
+    pub api_key: String,
+    pub system_prompt: String,
+    /// Context window size for the starting model. Updated on SetProvider if
+    /// the agent is extended to look up the new model's config.
+    pub context_window: u32,
+}
 
-/// Directory for agent logs (stderr redirection).
-const LOG_DIR: &str = "agent/logs";
+fn make_client(api_key: &str) -> openrouter::Client {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::HeaderName::from_static("http-referer"),
+        http::HeaderValue::from_static("https://iter.dev"),
+    );
+    headers.insert(
+        http::HeaderName::from_static("x-openrouter-title"),
+        http::HeaderValue::from_static("iter"),
+    );
+    headers.insert(
+        http::HeaderName::from_static("x-openrouter-categories"),
+        http::HeaderValue::from_static("cli-agent"),
+    );
 
-/// Log file name within the logs directory.
-const LOG_FILE: &str = "tui.log";
+    openrouter::Client::builder()
+        .api_key(api_key)
+        .http_headers(headers)
+        .build()
+        .expect("failed to create OpenRouter client")
+}
 
-// ============================================================================
-// Public API
-// ============================================================================
+pub async fn run_agent_loop(
+    config: AgentConfig,
+    event_tx: mpsc::Sender<AgentEvent>,
+    mut cmd_rx: mpsc::Receiver<TuiCommand>,
+    hooks: Vec<Box<dyn AgentHook>>,
+) {
+    let mut client = make_client(&config.api_key);
 
-/// Spawns the TypeScript agent as a child process.
-///
-/// Redirects stderr to a log file to prevent corrupting the TUI's alternate
-/// screen. Returns the child stdin handle for sending commands.
-pub fn spawn_agent(tx: Sender<UiEvent>) -> Option<std::process::ChildStdin> {
-    let log_path = setup_logging()?;
+    // Use the context window passed in from main (looked up from model config).
+    let mut context = Context::new(config.context_window);
+    let mut current_model = config.model.clone();
+    let abort = Arc::new(AtomicBool::new(false));
 
-    let mut child = match Command::new("bun")
-        .arg("run")
-        .arg(AGENT_ENTRY_PATH)
-        .env("OPENROUTER_API_KEY", std::env::var("OPENROUTER_API_KEY").unwrap_or_default())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(log_path)
-        .spawn()
-    {
-        Ok(c)  => c,
-        Err(e) => {
-            let _ = tx.send(UiEvent::SpawnError(e.to_string()));
-            return None;
+    let _ = event_tx.send(AgentEvent::AgentStart).await;
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            TuiCommand::Prompt(prompt) => {
+                abort.store(false, Ordering::Release);
+                let _ = event_tx.send(AgentEvent::TurnStart).await;
+                let abort_ref = abort.clone();
+
+                let mut deferred_model: Option<String> = None;
+                let mut deferred_clear = false;
+
+                let success = {
+                    let mut turn = std::pin::pin!(process_prompt(
+                        &client,
+                        &current_model,
+                        &prompt,
+                        &mut context,
+                        &event_tx,
+                        &config.system_prompt,
+                        &abort_ref,
+                        &hooks,
+                    ));
+
+                    loop {
+                        tokio::select! {
+                            biased;
+                            result = &mut turn => {
+                                break result;
+                            }
+                            Some(mid_cmd) = cmd_rx.recv() => {
+                                match mid_cmd {
+                                    TuiCommand::Abort => {
+                                        abort_ref.store(true, Ordering::Release);
+                                    }
+                                    TuiCommand::SetModel(m) => deferred_model = Some(m),
+                                    TuiCommand::Clear => deferred_clear = true,
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                };
+
+                if let Some(m) = deferred_model { current_model = m; }
+                if deferred_clear { context.clear(); }
+
+                let _ = event_tx.send(AgentEvent::TurnEnd).await;
+                let _ = event_tx
+                    .send(AgentEvent::AgentEnd {
+                        success,
+                        error: None,
+                    })
+                    .await;
+            }
+            TuiCommand::Abort => {}
+            TuiCommand::SetModel(model) => {
+                current_model = model;
+            }
+            TuiCommand::SetProvider(provider) => {
+                let env_key = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
+                let key = std::env::var(&env_key).unwrap_or_else(|_| config.api_key.clone());
+                client = make_client(&key);
+                let _ = event_tx
+                    .send(AgentEvent::ProviderChanged {
+                        provider_id: provider.clone(),
+                        provider_name: provider,
+                    })
+                    .await;
+            }
+            TuiCommand::SetProviderWithKey { provider, key } => {
+                client = make_client(&key);
+                let _ = event_tx
+                    .send(AgentEvent::ProviderChanged {
+                        provider_id: provider.clone(),
+                        provider_name: provider,
+                    })
+                    .await;
+            }
+            TuiCommand::Clear => {
+                context.clear();
+            }
         }
+    }
+}
+
+async fn process_prompt(
+    client: &openrouter::Client,
+    model: &str,
+    prompt: &str,
+    context: &mut Context,
+    event_tx: &mpsc::Sender<AgentEvent>,
+    system_prompt: &str,
+    abort: &AtomicBool,
+    hooks: &[Box<dyn AgentHook>],
+) -> bool {
+    let t_build = Instant::now();
+    let completion_model = client.completion_model(model.to_string());
+    crate::trace!("agent built in {}ms", t_build.elapsed().as_millis());
+
+    let mut success = true;
+
+    // Build initial message history: system + prior history + user prompt
+    let mut messages: Vec<Message> = Vec::new();
+    messages.push(Message::system(system_prompt.to_string()));
+    messages.extend(context.messages.clone());
+    messages.push(Message::user(prompt));
+
+    let static_tool_defs = {
+        let mut defs = Vec::new();
+        defs.push(tools::ReadFile.definition(prompt.to_string()).await);
+        defs.push(tools::WriteFile.definition(prompt.to_string()).await);
+        defs.push(tools::Edit.definition(prompt.to_string()).await);
+        defs.push(
+            tools::RunCommand::new(Some(event_tx.clone()))
+                .definition(prompt.to_string())
+                .await,
+        );
+        defs.push(tools::ListFiles.definition(prompt.to_string()).await);
+        defs.push(tools::SearchFiles.definition(prompt.to_string()).await);
+        defs.push(tools::Grep.definition(prompt.to_string()).await);
+        defs
     };
 
-    let stdout = child.stdout.take().expect("child stdout");
-    let stdin  = child.stdin.take().expect("child stdin");
-
-    // Spawn thread to read agent's stdout (push events).
-    let tx_clone = tx.clone();
-    thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().flatten() {
-            // eprintln!("[AGENT→TUI] {}", line);  // Debug logging - disabled to prevent TUI corruption
-            let msg = rpc::parse_line(&line);
-            let _ = tx_clone.send(UiEvent::Agent(msg));
-        }
-    });
-
-    Some(stdin)
-}
-
-/// Sends a JSON command to the agent over stdin.
-pub fn send_cmd(agent_stdin: &mut Option<std::process::ChildStdin>, payload: serde_json::Value) {
-    // eprintln!("[TUI→AGENT] {}", payload);  // Debug logging - disabled to prevent TUI corruption
-    if let Some(ref mut stdin) = agent_stdin {
-        let _ = writeln!(stdin, "{}", payload);
-    }
-}
-
-/// Sends abort command to stop the current streaming operation.
-pub fn send_abort(agent_stdin: &mut Option<std::process::ChildStdin>) {
-    send_cmd(agent_stdin, serde_json::json!({ "type": "abort" }));
-}
-
-/// Handles incoming agent messages, updating app state accordingly.
-pub fn handle_agent_msg(
-    app:         &mut crate::state::App,
-    agent_stdin: &mut Option<std::process::ChildStdin>,
-    msg:         AgentMessage,
-) {
-    match msg {
-        AgentMessage::Push(ev) => handle_push_event(app, agent_stdin, ev),
-        AgentMessage::Pull(resp) => handle_pull_response(app, agent_stdin, resp),
-        AgentMessage::Unknown { raw } => {
-            app.push_system(format!("[rpc] unparsed: {raw}"));
-        }
-    }
-}
-
-// ============================================================================
-// Private Helpers
-// ============================================================================
-
-/// Sets up logging directory and returns stderr file handle.
-fn setup_logging() -> Option<Stdio> {
-    let log_dir = std::path::Path::new(LOG_DIR);
-    let _ = fs::create_dir_all(log_dir);
-
-    let log_path = log_dir.join(LOG_FILE);
-    fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-        .map(Stdio::from)
-        .ok()
-}
-
-/// Handles push events from the agent (unprompted).
-fn handle_push_event(
-    app:         &mut crate::state::App,
-    agent_stdin: &mut Option<std::process::ChildStdin>,
-    ev:          PushEvent,
-) {
-    match ev {
-        PushEvent::AgentStart => {}
-
-        PushEvent::TurnStart => {
-            app.start_streaming();
+    'outer: loop {
+        if abort.load(Ordering::Acquire) {
+            success = false;
+            break;
         }
 
-        PushEvent::TextDelta { delta } => {
-            app.push_assistant_delta(delta);
-            app.scroll_to_bottom();
+        // Run context hooks before building the request.
+        // Clone static_tool_defs so hooks can mutate their copy each iteration.
+        let mut hook_ctx = BeforeLlmCtx { messages, tool_defs: static_tool_defs.clone() };
+        for hook in hooks {
+            if let Err(e) = hook.on_before_llm(&mut hook_ctx) {
+                let _ = event_tx.send(AgentEvent::Error { message: e }).await;
+                success = false;
+                break;
+            }
+        }
+        if !success {
+            break;
+        }
+        messages = hook_ctx.messages;
+        let tool_defs = hook_ctx.tool_defs;
+
+        let t_stream = Instant::now();
+
+        // Retry up to 3 times on rate-limit errors with exponential backoff.
+        // Uses a single labeled loop that covers both the initial connection
+        // *and* streaming — a 429 on the first chunk restarts the whole thing.
+        let mut req_retries = 0usize;
+        let stream = 'request: loop {
+            let request = CompletionRequest {
+                model: None,
+                preamble: None,
+                chat_history: OneOrMany::many(messages.clone())
+                    .expect("chat_history cannot be empty"),
+                documents: vec![],
+                tools: tool_defs.clone(),
+                temperature: Some(0.7),
+                max_tokens: Some(8192),
+                tool_choice: None,
+                additional_params: None,
+                output_schema: None,
+            };
+            let mut stream = match completion_model.stream(request).await {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if is_rate_limit(&msg) && req_retries < 3 {
+                        req_retries += 1;
+                        let delay_ms = 500u64 * (1u64 << req_retries);
+                        if !abortable_backoff(req_retries, 3, delay_ms, abort, event_tx).await {
+                            success = false;
+                            break 'outer;
+                        }
+                        continue 'request;
+                    }
+                    let _ = event_tx
+                        .send(AgentEvent::Error { message: msg }).await;
+                    success = false;
+                    break 'outer;
+                }
+            };
+
+            crate::trace!("stream_chat returned in {}ms", t_stream.elapsed().as_millis());
+
+            // Stream the assistant response
+            while let Some(item) = stream.next().await {
+                if abort.load(Ordering::Acquire) {
+                    success = false;
+                    break 'outer;
+                }
+
+                match item {
+                    Ok(StreamedAssistantContent::Text(text)) => {
+                        let _ = event_tx.send(AgentEvent::TextDelta(text.text)).await;
+                    }
+                    Ok(StreamedAssistantContent::Reasoning(reasoning)) => {
+                        let text = reasoning_text(&reasoning.content);
+                        let _ = event_tx
+                            .send(AgentEvent::ThinkingDelta(text))
+                            .await;
+                    }
+                    Ok(StreamedAssistantContent::ReasoningDelta { reasoning, .. }) => {
+                        let _ = event_tx
+                            .send(AgentEvent::ThinkingDelta(reasoning))
+                            .await;
+                    }
+                    Ok(StreamedAssistantContent::ToolCall { tool_call, .. }) => {
+                        let _ = event_tx
+                            .send(AgentEvent::ToolCall {
+                                name: tool_call.function.name,
+                                input: tool_call.function.arguments.to_string(),
+                            })
+                            .await;
+                    }
+                    Ok(StreamedAssistantContent::Final(response)) => {
+                        if let Some(usage) = response.token_usage() {
+                            let pct =
+                                (usage.total_tokens as f32 / context.context_window as f32) * 100.0;
+                            let _ = event_tx
+                                .send(AgentEvent::TokenUsage {
+                                    input: usage.input_tokens as u32,
+                                    output: usage.output_tokens as u32,
+                                    total: usage.total_tokens as u32,
+                                    cache_read: usage.cached_input_tokens as u32,
+                                    cache_write: usage.cache_creation_input_tokens as u32,
+                                    context_pct: pct,
+                                })
+                                .await;
+                        }
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if is_rate_limit(&msg) && req_retries < 3 {
+                            req_retries += 1;
+                            let delay_ms = 500u64 * (1u64 << req_retries);
+                            if !abortable_backoff(req_retries, 3, delay_ms, abort, event_tx).await {
+                                success = false;
+                                break 'outer;
+                            }
+                            continue 'request;
+                        }
+                        let _ = event_tx
+                            .send(AgentEvent::Error { message: msg })
+                            .await;
+                        success = false;
+                        break 'outer;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Stream finished without breaking — success.
+            break 'request stream;
+        };
+
+        if !success || abort.load(Ordering::Acquire) {
+            break;
         }
 
-        PushEvent::ThinkingDelta { delta } => {
-            app.push_thinking_delta(delta);
-            app.scroll_to_bottom();
+        // Add assistant message to history using the aggregated choice
+        messages.push(Message::Assistant {
+            id: None,
+            content: stream.choice.clone(),
+        });
+
+        // Check if there are tool calls to execute
+        let has_tool_calls = stream.choice.iter().any(|c| matches!(c, AssistantContent::ToolCall(_)));
+
+        if !has_tool_calls {
+            // No tool calls — done with this turn
+            context.messages = messages;
+            break;
         }
 
-        PushEvent::TurnEnd => {
-            app.mark_assistant_done();
-        }
+        // Collect tool calls from the choice
+        let tool_calls: Vec<ToolCall> = stream
+            .choice
+            .iter()
+            .filter_map(|c| {
+                if let AssistantContent::ToolCall(tc) = c {
+                    Some(tc.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        PushEvent::Cooldown { wait_ms, retries_left } => {
-            app.upsert_rate_limit(wait_ms, retries_left);
-            app.model_status = ModelStatus::Cooldown;
-        }
+        // Determine execution order: sequential if any tool requires it
+        if tool_calls.iter().any(|tc| tool_is_sequential(&tc.function.name)) {
+            // Run all tool calls sequentially
+            for tc in tool_calls {
+                let mut hook_blocked = false;
+                for hook in hooks {
+                    if let Err(e) = hook.on_before_tool(&tc) {
+                        let _ = event_tx.send(AgentEvent::Error { message: e }).await;
+                        success = false;
+                        hook_blocked = true;
+                        break;
+                    }
+                }
+                if hook_blocked {
+                    break;
+                }
 
-        PushEvent::RetryResult { success, attempt } => {
-            app.clear_rate_limit();
+                let start = Instant::now();
+                let result = execute_tool(&tc.function.name, &tc.function.arguments, Some(event_tx.clone())).await;
+                let elapsed = start.elapsed().as_millis() as u64;
+
+                push_tool_result(tc, result, elapsed, &mut messages, hooks, event_tx).await;
+            }
             if !success {
-                app.push_system(format!(
-                    "rate limit: failed after {} attempt{}",
-                    attempt,
-                    if attempt == 1 { "" } else { "s" }
-                ));
+                break;
+            }
+        } else {
+            // Execute all tool calls in parallel.
+            // Use FuturesUnordered so push_tool_result fires as each tool
+            // completes, rather than waiting for the slowest one.
+            let mut handles = FuturesUnordered::new();
+            for tc in tool_calls {
+                let mut hook_blocked = false;
+                for hook in hooks {
+                    if let Err(e) = hook.on_before_tool(&tc) {
+                        let _ = event_tx.send(AgentEvent::Error { message: e }).await;
+                        success = false;
+                        hook_blocked = true;
+                        break;
+                    }
+                }
+                if hook_blocked {
+                    break;
+                }
+
+                let name = tc.function.name.clone();
+                let args = tc.function.arguments.clone();
+                let tx = event_tx.clone();
+
+                handles.push(tokio::spawn(async move {
+                    let start = Instant::now();
+                    let result = execute_tool(&name, &args, Some(tx)).await;
+                    let elapsed = start.elapsed().as_millis() as u64;
+                    (tc, result, elapsed)
+                }));
+            }
+
+            // Process results as they complete — fast tools render first.
+            let mut panicked: Vec<String> = Vec::new();
+            while let Some(result) = handles.next().await {
+                match result {
+                    Ok((tool_call, output, elapsed_ms)) => {
+                        push_tool_result(tool_call, output, elapsed_ms, &mut messages, hooks, event_tx).await;
+                    }
+                    Err(e) => {
+                        panicked.push(format!("tool panicked: {e}"));
+                    }
+                }
+            }
+            for msg in panicked {
+                let _ = event_tx.send(AgentEvent::Error { message: msg }).await;
+                success = false;
+            }
+            if !success {
+                break;
             }
         }
 
-        PushEvent::AgentEnd => {
-            app.clear_rate_limit();
-            app.end_streaming();
-            app.turns += 1;
-            // Request updated session stats after turn ends.
-            send_cmd(agent_stdin, serde_json::json!({
-                "id":   format!("stats-{}", app.turns),
-                "type": "get_session_stats",
-            }));
-        }
+        // Loop back to send assistant another turn with tool results
+    }
 
-        PushEvent::Error { message } => {
-            app.clear_rate_limit();
-            app.push_system(format!("error: {message}"));
-            app.set_error();
-        }
+    success
+}
 
-        PushEvent::ToolCall { name, input } => {
-            // Don't push a separate message — ToolResult will show >> name(args) + result together.
-            // Store pending call so ToolResult can reference it.
-            app.pending_tool_call = Some((name, input));
-            app.tool_calls += 1;
-        }
+fn reasoning_text(content: &[ReasoningContent]) -> String {
+    content
+        .iter()
+        .filter_map(|c| match c {
+            ReasoningContent::Text { text, .. } => Some(text.clone()),
+            ReasoningContent::Summary(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
-        PushEvent::ToolResult { name, output } => {
-            // Pull the pending call args if available.
-            let args = app.pending_tool_call
-                .take()
-                .filter(|(n, _)| *n == name)
-                .map(|(_, a)| a)
-                .unwrap_or_default();
-            app.messages.push(ChatMessage {
-                kind:     MsgKind::ToolResult,
-                content:  output,
-                thinking: format!("{name}({args})"),  // "tool_name(args)" for >> display
-                done:     true,
-            });
+async fn execute_tool(
+    name: &str,
+    args: &serde_json::Value,
+    event_tx: Option<mpsc::Sender<AgentEvent>>,
+) -> Result<String, String> {
+    match name {
+        "read_file" => {
+            let a: tools::ReadFileArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            let result = tools::ReadFile.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
         }
-
-        PushEvent::ToolUpdate { .. } => {
-            // Live streaming delta — ignore in TUI (output already shown via ToolResult).
+        "write_file" => {
+            let a: tools::WriteFileArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::WriteFile.call(a).await.map_err(|e| e.to_string())
         }
+        "edit" => {
+            let a: tools::EditArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::Edit.call(a).await.map_err(|e| e.to_string())
+        }
+        "run_command" => {
+            let a: tools::RunCommandArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            tools::RunCommand::new(event_tx)
+                .call(a)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "list_files" => {
+            let a: tools::ListFilesArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            let result = tools::ListFiles.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
+        }
+        "search_files" => {
+            let a: tools::SearchFilesArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            let result = tools::SearchFiles.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
+        }
+        "grep" => {
+            let a: tools::GrepArgs =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            let result = tools::Grep.call(a).await.map_err(|e| e.to_string());
+            if let Ok(ref out) = result {
+                emit_tool_output(&event_tx, out).await;
+            }
+            result
+        }
+        _ => Err(format!("unknown tool: {}", name)),
+    }
+}
 
-        PushEvent::ModelList { models } => {
-            app.models = models.into_iter().map(|m| (m.id, m.name)).collect();
+/// Split a tool's text output into lines and emit each as a ToolOutput
+/// event so the TUI renders intermediate content before the final ToolResult.
+async fn emit_tool_output(event_tx: &Option<mpsc::Sender<AgentEvent>>, output: &str) {
+    if let Some(ref tx) = event_tx {
+        for line in output.lines() {
+            let _ = tx.send(AgentEvent::ToolOutput { delta: line.to_string() }).await;
         }
     }
 }
-fn handle_pull_response(
-    app:         &mut crate::state::App,
-    _agent_stdin: &mut Option<std::process::ChildStdin>,
-    resp:        rpc::PullResponse,
+
+fn tool_is_sequential(name: &str) -> bool {
+    matches!(name, "write_file" | "edit")
+}
+
+async fn push_tool_result(
+    tool_call: ToolCall,
+    result: Result<String, String>,
+    elapsed_ms: u64,
+    messages: &mut Vec<Message>,
+    hooks: &[Box<dyn AgentHook>],
+    event_tx: &mpsc::Sender<AgentEvent>,
 ) {
-    if !resp.success {
-        let err = resp.error.unwrap_or_else(|| "unknown error".into());
-        app.push_system(format!("[{}] failed: {}", resp.command, err));
-        return;
+    let output = match result {
+        Ok(output) => output,
+        Err(error) => error,
+    };
+
+    for hook in hooks {
+        hook.on_after_tool(&tool_call, &output, elapsed_ms);
     }
 
-    match resp.command.as_str() {
-        "get_state" => {
-            if let Some(data) = resp.data {
-                if let Ok(s) = serde_json::from_value::<StateData>(data) {
-                    app.update_model_info(s.model_name, s.model_limit, s.temp);
-                }
-            }
+    let _ = event_tx
+        .send(AgentEvent::ToolResult {
+            name: tool_call.function.name.clone(),
+            output: output.clone(),
+            elapsed_ms,
+        })
+        .await;
+
+    messages.push(Message::User {
+        content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+            id: tool_call.id.clone(),
+            call_id: tool_call.call_id.clone(),
+            content: OneOrMany::one(ToolResultContent::Text(Text {
+                text: output,
+            })),
+        })),
+    });
+}
+
+/// Run an abortable exponential-backoff wait, emitting `Retrying` ticks every
+/// 100ms so the TUI can animate a countdown bar.
+///
+/// Returns `true` if the wait completed normally (caller should retry),
+/// `false` if abort fired mid-wait (caller should break out of the turn).
+async fn abortable_backoff(
+    attempt: usize,
+    max_attempts: usize,
+    delay_ms: u64,
+    abort: &AtomicBool,
+    event_tx: &mpsc::Sender<AgentEvent>,
+) -> bool {
+    let tick_ms = 100u64;
+    let t_start = Instant::now();
+
+    loop {
+        let elapsed_ms = t_start.elapsed().as_millis() as u64;
+        let _ = event_tx
+            .send(AgentEvent::Retrying {
+                attempt:    attempt as u8,
+                total:      max_attempts as u8,
+                wait_ms:    delay_ms,
+                elapsed_ms,
+            })
+            .await;
+
+        if elapsed_ms >= delay_ms {
+            return true;
         }
-        "get_session_stats" => {
-            if let Some(data) = resp.data {
-                if let Ok(s) = serde_json::from_value::<rpc::SessionStatsData>(data) {
-                    app.update_tokens(
-                        s.tokens.input,
-                        s.tokens.output,
-                        s.tokens.cache_read,
-                        s.tokens.cache_write,
-                        s.tokens.total,
-                        s.context_usage.limit,
-                    );
-                    app.context_pct = s.context_usage.percent;
-                    app.cost        = s.cost;
-                    app.turns       = s.turns;
+
+        let remaining = delay_ms - elapsed_ms;
+        let sleep_for = tick_ms.min(remaining);
+
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep(std::time::Duration::from_millis(sleep_for)) => {}
+            _ = async {
+                while !abort.load(Ordering::Acquire) {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
-            }
+            } => { return false; }
         }
-        "set_model" => {
-            if let Some(data) = resp.data {
-                if let Ok(s) = serde_json::from_value::<rpc::SetModelData>(data) {
-                    app.update_model_info(s.model_name, s.model_limit, app.model_temp);
-                }
-            }
-        }
-        "prompt" | "abort" | "clear" => {}
-        other => {
-            app.push_system(format!("[rpc] unknown response: {other}"));
+
+        if abort.load(Ordering::Acquire) {
+            return false;
         }
     }
+}
+
+fn is_rate_limit(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("429")
+        || lower.contains("too many requests")
+        || lower.contains("too_many_requests")
+        || lower.contains("rate_limit")
+        || lower.contains("ratelimiterror")
+        || lower.contains("rate limit exceeded")
 }

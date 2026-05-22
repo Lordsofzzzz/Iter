@@ -1,181 +1,92 @@
 # Iter Coding Agent
 
-> ⚠️ **Status: In Development** - This project is under active development and may have breaking changes.
+> Status: In Development — breaking changes possible.
 
-A terminal-based AI coding assistant with a Rust TUI frontend and TypeScript agent backend.
-
-## Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Rust (ratatui) - Terminal UI                              │
-│  ┌──────────┐  ┌──────────┐  ┌─────────────────────────┐  │
-│  │ main.rs  │──│ agent.rs │──│ stdin/stdout JSONL       │  │
-│  │ (TUI)    │  │ (spawn)  │  │ protocol                │  │
-│  └──────────┘  └──────────┘  └───────────┬─────────────┘  │
-│                                            │                │
-│  ┌─────────────────────────────────────────┴─────────────┐  │
-│  │ state/ (App state, messages, tokens, model info)      │  │
-│  └───────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │ ui/ (chat, context, layout, theme)                    │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                         │ bun run
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  TypeScript Agent                                           │
-│  ┌──────────────────────────────────────────────────────┐    │
-│  │ index.ts - command dispatcher (prompt, get_state)   │    │
-│  └──────────────────────────────────────────────────────┘    │
-│  ┌──────────────────────────────────────────────────────┐    │
-│  │ llm/ - OpenRouter API client, history, stats         │    │
-│  └──────────────────────────────────────────────────────┘    │
-│  ┌──────────────────────────────────────────────────────┐    │
-│  │ utils/ - retry, logger                               │    │
-│  └──────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Features
-
-- **Interactive TUI**: Full terminal UI with chat, context panel, and token tracking
-- **Streaming Responses**: Real-time text delta streaming from the LLM
-- **Token Tracking**: Input/output/cache token counts with cost estimation
-- **Rate Limit Handling**: Automatic retry with exponential backoff and countdown display
-- **Session Stats**: Turns, tools, cost, and context usage monitoring
-
-## Prerequisites
-
-- **Rust** (for TUI): `cargo`, `rustc`
-- **Bun** (for agent): `bun`
-- **OpenRouter API Key**: Set `OPENROUTER_API_KEY` environment variable
-
-## Getting Started
-
-### 1. Install Dependencies
-
-```bash
-# Rust dependencies
-cargo build
-
-# TypeScript dependencies
-cd agent && bun install
-```
-
-### 2. Set API Key
-
-```bash
-export OPENROUTER_API_KEY="your-api-key-here"
-```
-
-### 3. Run the Application
-
-```bash
-cargo run
-```
-
-## Controls
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Send message to agent |
-| `Ctrl+C` | Quit application |
-| `Ctrl+U` | Clear input buffer |
-| `Ctrl+L` | Clear chat history |
-| `PgUp/PgDn` | Scroll chat history |
-| `Up/Down` | Navigate history |
+A command-line AI coding assistant. Single Rust binary: TUI, agent loop, tool execution, and LLM calls all in-process via [rig-core](https://github.com/0xPlaygrounds/rig).
 
 ## Architecture
 
-### Communication Protocol
-
-The TUI and agent communicate via JSONL (JSON Lines) over stdin/stdout:
-
-**Push Events** (Agent → TUI):
-- `agent_start`, `turn_start`, `turn_end`, `agent_end`
-- `text_delta` - streaming text chunks
-- `error` - error messages
-- `cooldown` - rate limit warning
-- `retry_result` - retry attempt result
-
-**Pull Responses** (TUI → Agent → TUI):
-- `get_state` - current model configuration
-- `get_session_stats` - token counts, cost, turns
-- `prompt` - send user message
-- `abort` - cancel current request
-- `clear` - reset conversation
-
-### File Structure
-
 ```
-src/
-├── main.rs        # Entry point, event loop
-├── agent.rs       # Process spawning, message handling
-├── rpc.rs         # Protocol types, parsing
-├── state/
-│   └── app.rs     # Application state
-└── ui/
-    ├── layout.rs  # Main layout
-    ├── chat.rs   # Chat panel widget
-    ├── context.rs # Context/tokens panel
-    └── theme.rs  # Styling constants
-
-agent/src/
-├── index.ts       # Agent entry point
-├── rpc.ts         # Protocol types
-├── llm/
-│   ├── client.ts  # OpenRouter client
-│   ├── history.ts # Message history
-│   └── stats.ts   # Session statistics
-└── utils/
-    ├── retry.ts   # Retry with backoff
-    └── logger.ts  # File logging
+iter (single binary)
+  main.rs          CLI entry point, TUI event loop
+  cli.rs           clap command definitions
+  agent.rs         Rig agent loop, streams events to TUI via mpsc
+  agent_event.rs   AgentEvent / TuiCommand channel types
+  context.rs       Message history with auto-compaction at 80% usage
+  tools.rs         Tool impls: read_file, write_file, edit, run_command, list_files, search_files
+  input.rs         Inline bordered input box with slash-command picker
+  state/mod.rs     Minimal runtime state for status bar
 ```
 
-## Configuration
+LLM calls go through OpenRouter. Any OpenRouter model ID is accepted.
 
-### Environment Variables
+## Prerequisites
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENROUTER_API_KEY` | API key for OpenRouter | (required) |
-| `MODEL_NAME` | LLM model to use | `google/gemma-4-31b-it:free` |
+- Rust (`cargo`, `rustc`)
+- `OPENROUTER_API_KEY` environment variable
 
-### Model Configuration
+## Getting Started
 
-Default settings in `agent/src/llm/client.ts`:
-- Model: `google/gemma-4-31b-it:free`
-- Context: 200k tokens
-- Temperature: 0.3
+```bash
+export OPENROUTER_API_KEY="your-key-here"
+cargo build --release
+```
 
-## Development Notice
+Run a single prompt:
 
-This project is in active development. Expect:
-- Breaking changes to internal APIs
-- Incomplete features
-- Evolving documentation
+```bash
+cargo run --bin iter -- ask "summarize this repository"
+```
+
+Interactive mode (no prompt):
+
+```bash
+cargo run --bin iter -- ask
+```
+
+Use a specific model or working directory:
+
+```bash
+cargo run --bin iter -- --model "google/gemini-2.5-pro" -C /path/to/project ask "inspect the code"
+```
+
+## Options
+
+| Flag | Env | Description |
+|------|-----|-------------|
+| `-m`, `--model` | `MODEL_NAME` | OpenRouter model ID (default: `deepseek/deepseek-v4-flash:free`) |
+| `-C`, `--workdir` | — | Change working directory before running |
+| `--show-thinking` | — | Print model reasoning/thinking tokens |
+
+## Keyboard Shortcuts (interactive mode)
+
+| Key | Action |
+|-----|--------|
+| `↵` | Submit prompt |
+| `^k` | Abort current request |
+| `^u` | Clear input |
+| `^c` / `^d` | Quit |
+| `/` | Slash-command picker |
+
+## Slash Commands
+
+| Command | Effect |
+|---------|--------|
+| `/model` | Switch active model |
+| `/provider` | Switch provider |
+| `/clear` | Clear conversation history |
+| `/abort` | Abort current request |
+| `/help` | Show available commands |
+
+## Tools available to the agent
+
+- `read_file` — read a file
+- `write_file` — write/create a file
+- `edit` — replace first occurrence of text in a file
+- `run_command` — execute a shell command (stdout+stderr interleaved)
+- `list_files` — list a directory
+- `search_files` — glob search for files
 
 ## License
 
-MIT License
-
-Copyright (c) 2024 Iter Contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+MIT

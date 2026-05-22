@@ -1,14 +1,40 @@
 [package]
-name = "agent-tui"
-version = "0.1.0"
+name = "iter"
+version = "0.2.0"
 edition = "2021"
 
+[[bin]]
+name = "iter"
+path = "src/main.rs"
+
 [dependencies]
-ratatui      = "0.29"
-crossterm    = "0.28"
-tui-textarea = "0.7"
-tokio       = { version = "1", features = ["full"] }
-serde       = { version = "1", features = ["derive"] }
-serde_json  = "1"
-rand        = "0.8"
-markdown    = "1"
+clap          = { version = "4.6", features = ["derive", "env"] }
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+crossterm     = "0.29"
+termimad      = "0.34"
+unicode-width = "0.2"
+
+rig-core      = { version = "0.37", features = ["derive", "rustls"] }
+tokio         = { version = "1", features = ["rt-multi-thread", "macros", "sync", "process", "io-util"] }
+futures       = "0.3"
+thiserror     = "1"
+glob          = "0.3"
+toml          = "0.8"
+dirs          = "5"
+http          = "1"
+
+[[bin]]
+name = "test_mad"
+path = "src/bin/test_mad.rs"
+
+
+[[bin]]
+name = "test_ui"
+path = "src/bin/test_ui.rs"
+
+
+[[bin]]
+name = "test_newlines"
+path = "src/bin/test_newlines.rs"
+

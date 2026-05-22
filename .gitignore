@@ -1,6 +1,10 @@
 # Rust
 target/
 
+# Node modules
+node_modules/
+agent/node_modules/
+
 # Logs
 *.log
 agent/logs/
