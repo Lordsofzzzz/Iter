@@ -49,7 +49,7 @@ fn main() -> io::Result<()> {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     }
 
-    let model = cli.global.model.unwrap_or_else(|| "deepseek/deepseek-v4-flash:free".into());
+    let model = cli.global.model.unwrap_or_else(|| "deepseek/deepseek-chat:free".into());
     let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
     let api_key = if api_key.is_empty() {
         eprint!("OPENROUTER_API_KEY not set. Enter key: ");
@@ -206,9 +206,7 @@ async fn handle_turn(
     let mut last_char = '\n';
     let skin = MadSkin::default();
 
-    // FIX: cache terminal width; update only when a Resize event arrives instead
-    // of calling terminal::size() (a syscall) on every streaming token.
-    let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
+    let mut term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
 
     // FIX: track whether AgentEnd was received so we can detect a premature
     // channel close (agent task panic).
@@ -223,6 +221,9 @@ async fn handle_turn(
 
         match event {
             AgentEvent::TextDelta(delta) => {
+                // Refresh terminal width each delta — cheap compared to rendering,
+                // and keeps wrap correct if the user resized mid-response.
+                term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
                 if first_token_time.is_none() {
                     first_token_time = Some(elapsed);
                     trace!("first text delta at {}ms", elapsed);
@@ -320,10 +321,45 @@ async fn handle_turn(
                 state.tokens_cache_write = cache_write;
                 state.context_pct = context_pct;
             }
+            AgentEvent::Retrying { attempt, total, wait_ms, elapsed_ms } => {
+                let remaining_ms = wait_ms.saturating_sub(elapsed_ms);
+                let remaining_s  = (remaining_ms as f64 / 1000.0).ceil() as u64;
+
+                let bar_width = 10usize;
+                let filled    = (((elapsed_ms as f64 / wait_ms as f64) * bar_width as f64)
+                    .round() as usize)
+                    .min(bar_width);
+                let bar = format!(
+                    "[{}{}]",
+                    "█".repeat(filled),
+                    "░".repeat(bar_width - filled),
+                );
+
+                print!(
+                    "\r  {} {}/{} — retrying in {}s {} ",
+                    "rate limited".with(Color::DarkYellow),
+                    attempt.to_string().with(Color::White),
+                    total.to_string().with(Color::DarkGrey),
+                    remaining_s.to_string().with(Color::White),
+                    bar.with(Color::DarkYellow),
+                );
+                io::stdout().flush().ok();
+                last_char = ' ';
+            }
             AgentEvent::TurnEnd => {
                 state.turns += 1;
             }
             AgentEvent::Error { message } => {
+                // Flush any partial text block before showing the error.
+                // Also clear it so the next TextDelta doesn't re-render stale content.
+                if !current_text_block.is_empty() {
+                    if last_char != '\n' {
+                        println!();
+                    }
+                    current_text_block.clear();
+                    last_rendered_lines.clear();
+                    last_char = '\n';
+                }
                 print_status(&message, Color::DarkRed);
             }
             AgentEvent::AgentEnd { .. } => {
@@ -346,7 +382,6 @@ async fn handle_turn(
                     io::stdout().flush().ok();
                 }
             }
-            // FIX: update cached terminal width on resize.
             AgentEvent::TurnStart => {}
             _ => {}
         }
@@ -608,9 +643,7 @@ fn truncate_display(text: &str, max_cols: usize) -> String {
     while let Some(ch) = chars.next() {
         let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
         if width + w > max_cols {
-            // Doesn't fit — check if there's more content to signal truncation.
-            if chars.peek().is_some() || width + w > max_cols {
-                // Replace last char(s) if needed to fit the ellipsis.
+            if chars.peek().is_some() {
                 result.push('…');
             }
             break;

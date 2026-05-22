@@ -34,7 +34,24 @@ pub struct AgentConfig {
 }
 
 fn make_client(api_key: &str) -> openrouter::Client {
-    openrouter::Client::new(api_key)
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::HeaderName::from_static("http-referer"),
+        http::HeaderValue::from_static("https://iter.dev"),
+    );
+    headers.insert(
+        http::HeaderName::from_static("x-openrouter-title"),
+        http::HeaderValue::from_static("iter"),
+    );
+    headers.insert(
+        http::HeaderName::from_static("x-openrouter-categories"),
+        http::HeaderValue::from_static("cli-agent"),
+    );
+
+    openrouter::Client::builder()
+        .api_key(api_key)
+        .http_headers(headers)
+        .build()
         .expect("failed to create OpenRouter client")
 }
 
@@ -177,7 +194,7 @@ async fn process_prompt(
         defs
     };
 
-    loop {
+    'outer: loop {
         if abort.load(Ordering::Acquire) {
             success = false;
             break;
@@ -201,92 +218,116 @@ async fn process_prompt(
 
         let t_stream = Instant::now();
 
-        let request = CompletionRequest {
-            model: None,
-            preamble: None,
-            chat_history: OneOrMany::many(messages.clone())
-                .expect("chat_history cannot be empty"),
-            documents: vec![],
-            tools: tool_defs,
-            temperature: Some(0.7),
-            max_tokens: Some(8192),
-            tool_choice: None,
-            additional_params: None,
-            output_schema: None,
-        };
-
-        let mut stream = match completion_model.stream(request).await {
-            Ok(s) => s,
-            Err(e) => {
-                let _ = event_tx
-                    .send(AgentEvent::Error {
-                        message: e.to_string(),
-                    })
-                    .await;
-                success = false;
-                break;
-            }
-        };
-        crate::trace!("stream_chat returned in {}ms", t_stream.elapsed().as_millis());
-
-        // Stream the assistant response
-        while let Some(item) = stream.next().await {
-            if abort.load(Ordering::Acquire) {
-                success = false;
-                break;
-            }
-
-            match item {
-                Ok(StreamedAssistantContent::Text(text)) => {
-                    let _ = event_tx.send(AgentEvent::TextDelta(text.text)).await;
-                }
-                Ok(StreamedAssistantContent::Reasoning(reasoning)) => {
-                    let text = reasoning_text(&reasoning.content);
+        // Retry up to 3 times on rate-limit errors with exponential backoff.
+        // Uses a single labeled loop that covers both the initial connection
+        // *and* streaming — a 429 on the first chunk restarts the whole thing.
+        let mut req_retries = 0usize;
+        let stream = 'request: loop {
+            let request = CompletionRequest {
+                model: None,
+                preamble: None,
+                chat_history: OneOrMany::many(messages.clone())
+                    .expect("chat_history cannot be empty"),
+                documents: vec![],
+                tools: tool_defs.clone(),
+                temperature: Some(0.7),
+                max_tokens: Some(8192),
+                tool_choice: None,
+                additional_params: None,
+                output_schema: None,
+            };
+            let mut stream = match completion_model.stream(request).await {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if is_rate_limit(&msg) && req_retries < 3 {
+                        req_retries += 1;
+                        let delay_ms = 500u64 * (1u64 << req_retries);
+                        if !abortable_backoff(req_retries, 3, delay_ms, abort, event_tx).await {
+                            success = false;
+                            break 'outer;
+                        }
+                        continue 'request;
+                    }
                     let _ = event_tx
-                        .send(AgentEvent::ThinkingDelta(text))
-                        .await;
+                        .send(AgentEvent::Error { message: msg }).await;
+                    success = false;
+                    break 'outer;
                 }
-                Ok(StreamedAssistantContent::ReasoningDelta { reasoning, .. }) => {
-                    let _ = event_tx
-                        .send(AgentEvent::ThinkingDelta(reasoning))
-                        .await;
+            };
+
+            crate::trace!("stream_chat returned in {}ms", t_stream.elapsed().as_millis());
+
+            // Stream the assistant response
+            while let Some(item) = stream.next().await {
+                if abort.load(Ordering::Acquire) {
+                    success = false;
+                    break 'outer;
                 }
-                Ok(StreamedAssistantContent::ToolCall { tool_call, .. }) => {
-                    let _ = event_tx
-                        .send(AgentEvent::ToolCall {
-                            name: tool_call.function.name,
-                            input: tool_call.function.arguments.to_string(),
-                        })
-                        .await;
-                }
-                Ok(StreamedAssistantContent::Final(response)) => {
-                    if let Some(usage) = response.token_usage() {
-                        let pct =
-                            (usage.total_tokens as f32 / context.context_window as f32) * 100.0;
+
+                match item {
+                    Ok(StreamedAssistantContent::Text(text)) => {
+                        let _ = event_tx.send(AgentEvent::TextDelta(text.text)).await;
+                    }
+                    Ok(StreamedAssistantContent::Reasoning(reasoning)) => {
+                        let text = reasoning_text(&reasoning.content);
                         let _ = event_tx
-                            .send(AgentEvent::TokenUsage {
-                                input: usage.input_tokens as u32,
-                                output: usage.output_tokens as u32,
-                                total: usage.total_tokens as u32,
-                                cache_read: usage.cached_input_tokens as u32,
-                                cache_write: usage.cache_creation_input_tokens as u32,
-                                context_pct: pct,
+                            .send(AgentEvent::ThinkingDelta(text))
+                            .await;
+                    }
+                    Ok(StreamedAssistantContent::ReasoningDelta { reasoning, .. }) => {
+                        let _ = event_tx
+                            .send(AgentEvent::ThinkingDelta(reasoning))
+                            .await;
+                    }
+                    Ok(StreamedAssistantContent::ToolCall { tool_call, .. }) => {
+                        let _ = event_tx
+                            .send(AgentEvent::ToolCall {
+                                name: tool_call.function.name,
+                                input: tool_call.function.arguments.to_string(),
                             })
                             .await;
                     }
+                    Ok(StreamedAssistantContent::Final(response)) => {
+                        if let Some(usage) = response.token_usage() {
+                            let pct =
+                                (usage.total_tokens as f32 / context.context_window as f32) * 100.0;
+                            let _ = event_tx
+                                .send(AgentEvent::TokenUsage {
+                                    input: usage.input_tokens as u32,
+                                    output: usage.output_tokens as u32,
+                                    total: usage.total_tokens as u32,
+                                    cache_read: usage.cached_input_tokens as u32,
+                                    cache_write: usage.cache_creation_input_tokens as u32,
+                                    context_pct: pct,
+                                })
+                                .await;
+                        }
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if is_rate_limit(&msg) && req_retries < 3 {
+                            req_retries += 1;
+                            let delay_ms = 500u64 * (1u64 << req_retries);
+                            if !abortable_backoff(req_retries, 3, delay_ms, abort, event_tx).await {
+                                success = false;
+                                break 'outer;
+                            }
+                            continue 'request;
+                        }
+                        let _ = event_tx
+                            .send(AgentEvent::Error { message: msg })
+                            .await;
+                        success = false;
+                        break 'outer;
+                    }
+                    _ => {}
                 }
-                Err(e) => {
-                    let _ = event_tx
-                        .send(AgentEvent::Error {
-                            message: e.to_string(),
-                        })
-                        .await;
-                    success = false;
-                    break;
-                }
-                _ => {}
             }
-        }
+
+            // Stream finished without breaking — success.
+            break 'request stream;
+        };
 
         // FIX: removed dead `if !success { success = false; }` inner branch.
         if !success || abort.load(Ordering::Acquire) {
@@ -336,7 +377,7 @@ async fn process_prompt(
                     }
                 }
                 if hook_blocked {
-                    continue;
+                    break;
                 }
 
                 let start = Instant::now();
@@ -377,26 +418,24 @@ async fn process_prompt(
 
             let results = join_all(handles).await;
 
+            // Push all completed results first (order matters for LLM context),
+            // then surface any panics. Breaking after a panic avoids sending the
+            // LLM an incomplete tool-call/result set on the next turn.
+            let mut panicked: Vec<String> = Vec::new();
             for result in results {
                 match result {
                     Ok((tool_call, output, elapsed_ms)) => {
                         push_tool_result(tool_call, output, elapsed_ms, &mut messages, hooks, event_tx).await;
                     }
                     Err(e) => {
-                        let _ = event_tx
-                            .send(AgentEvent::Error {
-                                message: e.to_string(),
-                            })
-                            .await;
-                        // FIX: break out of result processing — a panicked spawn
-                        // means something is badly wrong; don't continue the loop.
-                        success = false;
-                        break;
+                        panicked.push(format!("tool panicked: {e}"));
                     }
                 }
             }
-
-            // Propagate the break out of the outer loop too if parallel failed.
+            for msg in panicked {
+                let _ = event_tx.send(AgentEvent::Error { message: msg }).await;
+                success = false;
+            }
             if !success {
                 break;
             }
@@ -506,4 +545,63 @@ async fn push_tool_result(
             })),
         })),
     });
+}
+
+/// Run an abortable exponential-backoff wait, emitting `Retrying` ticks every
+/// 100ms so the TUI can animate a countdown bar.
+///
+/// Returns `true` if the wait completed normally (caller should retry),
+/// `false` if abort fired mid-wait (caller should break out of the turn).
+async fn abortable_backoff(
+    attempt: usize,
+    max_attempts: usize,
+    delay_ms: u64,
+    abort: &AtomicBool,
+    event_tx: &mpsc::Sender<AgentEvent>,
+) -> bool {
+    let tick_ms = 100u64;
+    let t_start = Instant::now();
+
+    loop {
+        let elapsed_ms = t_start.elapsed().as_millis() as u64;
+        let _ = event_tx
+            .send(AgentEvent::Retrying {
+                attempt:    attempt as u8,
+                total:      max_attempts as u8,
+                wait_ms:    delay_ms,
+                elapsed_ms,
+            })
+            .await;
+
+        if elapsed_ms >= delay_ms {
+            return true;
+        }
+
+        let remaining = delay_ms - elapsed_ms;
+        let sleep_for = tick_ms.min(remaining);
+
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep(std::time::Duration::from_millis(sleep_for)) => {}
+            _ = async {
+                while !abort.load(Ordering::Acquire) {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            } => { return false; }
+        }
+
+        if abort.load(Ordering::Acquire) {
+            return false;
+        }
+    }
+}
+
+fn is_rate_limit(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("429")
+        || lower.contains("too many requests")
+        || lower.contains("too_many_requests")
+        || lower.contains("rate_limit")
+        || lower.contains("ratelimiterror")
+        || lower.contains("rate limit exceeded")
 }

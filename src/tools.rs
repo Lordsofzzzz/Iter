@@ -1,5 +1,6 @@
 //! Tool implementations: read_file, write_file, edit, run_command, list_files, search_files
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use rig_core::completion::ToolDefinition;
@@ -154,7 +155,6 @@ impl Tool for Edit {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // FIX: use tokio::fs throughout.
         let content = tokio::fs::read_to_string(&args.path)
             .await
             .map_err(|e| EditError(format!("read: {e}")))?;
@@ -162,9 +162,17 @@ impl Tool for Edit {
             return Err(EditError("old text not found".into()));
         }
         let result = content.replacen(&args.old, &args.new, 1);
-        tokio::fs::write(&args.path, &result)
+
+        // Write to a temp file first, then atomically rename to avoid
+        // data corruption if the process is killed mid-write.
+        let tmp_path = format!("{}.iter.tmp", args.path);
+        tokio::fs::write(&tmp_path, &result)
             .await
-            .map_err(|e| EditError(format!("write: {e}")))?;
+            .map_err(|e| EditError(format!("write tmp: {e}")))?;
+        tokio::fs::rename(&tmp_path, &args.path)
+            .await
+            .map_err(|e| EditError(format!("rename: {e}")))?;
+
         Ok(format!("edited {}", args.path))
     }
 }
@@ -283,8 +291,12 @@ impl RunCommand {
                                 result.push_str(&l);
                                 result.push('\n');
                             }
-                            if let Some(ref tx) = tx {
-                                let _ = tx.send(AgentEvent::ToolOutput { delta: l }).await;
+                            // Only relay stderr to the UI while still buffering
+                            // to avoid flooding the event channel with 1MB+ of output.
+                            if result.len() < RUN_COMMAND_MAX_OUTPUT {
+                                if let Some(ref tx) = tx {
+                                    let _ = tx.send(AgentEvent::ToolOutput { delta: l }).await;
+                                }
                             }
                         }
                         None => stderr_done = true,
@@ -582,9 +594,12 @@ impl Grep {
             })?;
 
         if !output.status.success() {
+            let code = output.status.code();
             let stderr = String::from_utf8_lossy(&output.stderr);
             let trimmed = stderr.trim();
-            if !trimmed.is_empty() {
+            // rg exit code 1 = no matches (expected), exit code 2 = real error.
+            // If exit code is 2 or stderr has content, surface the error.
+            if code == Some(2) || !trimmed.is_empty() {
                 return Err(GrepError(trimmed.to_string()));
             }
         }
@@ -649,6 +664,7 @@ impl Grep {
     }
 
     fn format_files(rg_json: &str) -> Result<String, GrepError> {
+        let mut seen = HashSet::new();
         let mut files: Vec<String> = Vec::new();
 
         for line in rg_json.lines() {
@@ -661,7 +677,7 @@ impl Grep {
             if v["type"].as_str() == Some("match") {
                 if let Some(file) = v["data"]["path"]["text"].as_str() {
                     let s = file.to_string();
-                    if !files.contains(&s) {
+                    if seen.insert(s.clone()) {
                         files.push(s);
                     }
                 }
@@ -754,8 +770,8 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(result.contains("src/tools.rs:34:impl Tool for ReadFile {"));
-        assert!(result.contains("src/tools.rs:78:impl Tool for WriteFile {"));
+        assert!(result.contains("src/tools.rs:35:impl Tool for ReadFile {"));
+        assert!(result.contains("src/tools.rs:79:impl Tool for WriteFile {"));
         assert!(!result.contains("src/tools.rs-"));
     }
 

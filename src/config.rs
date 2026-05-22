@@ -48,7 +48,9 @@ impl ModelConfig {
     }
 
     /// Return the model list for the picker: (id, display_name, context_window_str).
-    pub fn picker_entries(&self) -> Vec<(&str, &str, &str)> {
+    /// Leaks heap-allocated strings to obtain 'static lifetimes for the picker.
+    /// Called once via `OnceLock` in `global_model_entries` — do not call repeatedly.
+    pub(crate) fn picker_entries(&self) -> Vec<(&'static str, &'static str, &'static str)> {
         struct Entry {
             id: String,
             name: String,

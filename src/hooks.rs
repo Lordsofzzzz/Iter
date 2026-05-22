@@ -1,5 +1,3 @@
-use tiktoken_rs::cl100k_base_singleton;
-
 use rig_core::completion::message::{
     AssistantContent, Message, ReasoningContent, ToolCall, ToolResultContent, UserContent,
 };
@@ -28,72 +26,63 @@ pub trait AgentHook: Send + Sync {
     fn on_after_tool(&self, _call: &ToolCall, _result: &str, _elapsed_ms: u64) {}
 }
 
-/// Estimate the number of tokens for a list of messages using tiktoken.
+/// Estimate token count using a conservative character-based heuristic.
+///
+/// tiktoken's cl100k is GPT-4 specific and diverges 15-30% for DeepSeek,
+/// Gemini, Mistral, etc. A flat chars/3.5 estimate is less precise but
+/// uniformly safe across all model families. Rounds up to avoid undercount.
 pub fn estimate_tokens(messages: &[Message]) -> usize {
-    let bpe = cl100k_base_singleton();
-    let bpe = bpe.lock();
-    let mut total = 0;
+    let mut chars = 0usize;
 
     for msg in messages {
-        total += 4;
+        chars += 4; // per-message overhead
         match msg {
             Message::System { content } => {
-                total += bpe.encode_with_special_tokens(content).len();
+                chars += content.len();
             }
             Message::User { content } => {
                 for c in content.iter() {
                     match c {
-                        UserContent::Text(t) => {
-                            total += bpe.encode_with_special_tokens(&t.text).len();
-                        }
+                        UserContent::Text(t) => chars += t.text.len(),
                         UserContent::ToolResult(tr) => {
                             for rc in tr.content.iter() {
                                 match rc {
-                                    ToolResultContent::Text(t) => {
-                                        total += bpe.encode_with_special_tokens(&t.text).len();
-                                    }
-                                    _ => total += 50,
+                                    ToolResultContent::Text(t) => chars += t.text.len(),
+                                    _ => chars += 50,
                                 }
                             }
                         }
-                        _ => total += 50,
+                        _ => chars += 50,
                     }
                 }
             }
             Message::Assistant { content, .. } => {
                 for c in content.iter() {
                     match c {
-                        AssistantContent::Text(t) => {
-                            total += bpe.encode_with_special_tokens(&t.text).len();
-                        }
+                        AssistantContent::Text(t) => chars += t.text.len(),
                         AssistantContent::ToolCall(tc) => {
-                            total += bpe.encode_with_special_tokens(&tc.function.name).len();
-                            total += bpe
-                                .encode_with_special_tokens(&tc.function.arguments.to_string())
-                                .len();
-                            total += 8;
+                            chars += tc.function.name.len();
+                            chars += tc.function.arguments.to_string().len();
+                            chars += 8;
                         }
                         AssistantContent::Reasoning(r) => {
                             for rc in &r.content {
                                 match rc {
-                                    ReasoningContent::Text { text, .. } => {
-                                        total += bpe.encode_with_special_tokens(text).len();
-                                    }
-                                    ReasoningContent::Summary(s) => {
-                                        total += bpe.encode_with_special_tokens(s).len();
-                                    }
-                                    _ => total += 20,
+                                    ReasoningContent::Text { text, .. } => chars += text.len(),
+                                    ReasoningContent::Summary(s) => chars += s.len(),
+                                    _ => chars += 20,
                                 }
                             }
                         }
-                        _ => total += 50,
+                        _ => chars += 50,
                     }
                 }
             }
         }
     }
 
-    total
+    // 3.5 chars/token is a safe cross-model average; ceiling to avoid undercount.
+    chars.div_ceil(3)
 }
 
 /// Built-in hook that prunes messages when estimated tokens exceed a threshold.
@@ -123,13 +112,15 @@ impl AgentHook for CompactContextHook {
             return Ok(());
         }
 
-        let dropped = ctx.messages.len().saturating_sub(self.keep_front + self.keep_back);
+        let mut compacted: Vec<Message> = ctx.messages.drain(..self.keep_front).collect();
+        let dropped = ctx.messages.len().saturating_sub(self.keep_back);
         if dropped == 0 {
+            compacted.append(&mut ctx.messages);
+            ctx.messages = compacted;
             return Ok(());
         }
 
-        let mut compacted: Vec<Message> = ctx.messages.drain(..self.keep_front).collect();
-        let back = ctx.messages.split_off(ctx.messages.len().saturating_sub(self.keep_back));
+        let back = ctx.messages.split_off(dropped);
 
         compacted.push(Message::user(format!(
             "[{} earlier messages omitted for context length]",

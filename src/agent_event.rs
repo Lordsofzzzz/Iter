@@ -20,6 +20,17 @@ pub enum AgentEvent {
         cache_write: u32,
         context_pct: f32,
     },
+    /// Emitted once per retry tick so the TUI can display a live countdown.
+    /// `attempt`  — which retry this is (1-based).
+    /// `total`    — max retries allowed.
+    /// `wait_ms`  — total backoff duration for this attempt.
+    /// `elapsed_ms` — how many ms have passed so far in this wait.
+    Retrying {
+        attempt: u8,
+        total: u8,
+        wait_ms: u64,
+        elapsed_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
